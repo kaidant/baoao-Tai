@@ -1,5 +1,7 @@
-// Tự động dùng IP của server — hoạt động cả localhost lẫn LAN
-const BASE = `http://${window.location.hostname}:3001/api`
+// Dùng VITE_API_URL khi deploy, fallback về localhost khi dev
+const BASE = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api`
+  : `http://${window.location.hostname}:3001/api`
 
 export async function getProjects() {
   const res = await fetch(`${BASE}/projects`)

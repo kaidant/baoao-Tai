@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { getProjects, getReport } from '../api'
 
-const API = `http://${window.location.hostname}:3001`
+const API = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`
 
 const NAV = [
   { id: 'dashboard',  label: 'Dashboard',    icon: LayoutDashboard },
