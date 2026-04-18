@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   FolderKanban, UserSquare2, ClipboardList,
   LogOut, Search, CircleUser, Calendar, FileText,
   Image, Video, ChevronLeft, ChevronRight, X, Loader2, Maximize2,
+  Upload, Trash2, CheckCircle2, AlertCircle, Pencil,
 } from 'lucide-react'
-import { getProjects, getReport } from '../api'
+import { getProjects, getReport, uploadFiles, deleteFile, saveNotes, submitReport } from '../api'
 import { supabase } from '../supabase'
 
 const NAV = [
@@ -53,9 +54,7 @@ function Sidebar({ onSwitch, onLogout }) {
         })}
       </nav>
       <div style={{ padding: '12px 10px' }}>
-        <button
-          type="button"
-          onClick={() => typeof onLogout === 'function' && onLogout()}
+        <button type="button" onClick={() => typeof onLogout === 'function' && onLogout()}
           style={{ width: '100%', padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
           <LogOut size={14} /> Đăng xuất
         </button>
@@ -153,24 +152,20 @@ function Slideshow({ project, report, onClose }) {
           </button>
         </div>
       </div>
-
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '80px 70px' }}>
         <button disabled={idx === 0} onClick={() => setIdx(i => i - 1)}
           style={{ position: 'absolute', left: 16, width: 44, height: 44, background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: '50%', color: '#fff', cursor: idx === 0 ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: idx === 0 ? 0.25 : 1 }}>
           <ChevronLeft size={22} />
         </button>
-
         {cur?.type === 'image'
           ? <img src={getUrl(cur)} alt={cur.originalName} style={{ maxHeight: '78vh', maxWidth: '100%', objectFit: 'contain', borderRadius: 12, boxShadow: '0 25px 60px rgba(0,0,0,0.6)' }} />
           : <video key={cur?.filename} src={getUrl(cur)} controls autoPlay style={{ maxHeight: '78vh', maxWidth: '100%', borderRadius: 12, boxShadow: '0 25px 60px rgba(0,0,0,0.6)' }} />
         }
-
         <button disabled={idx === slides.length - 1} onClick={() => setIdx(i => i + 1)}
           style={{ position: 'absolute', right: 16, width: 44, height: 44, background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: '50%', color: '#fff', cursor: idx === slides.length - 1 ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: idx === slides.length - 1 ? 0.25 : 1 }}>
           <ChevronRight size={22} />
         </button>
       </div>
-
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, paddingBottom: 24, background: 'linear-gradient(to top, rgba(0,0,0,0.6), transparent)', paddingTop: 30 }}>
         {idx === slides.length - 1 && report?.notes && (
           <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13, textAlign: 'center', maxWidth: 500, padding: '0 16px' }}>{report.notes}</div>
@@ -192,16 +187,28 @@ function DetailPanel({ project }) {
   const [report,     setReport]     = useState(null)
   const [loading,    setLoading]    = useState(false)
   const [presenting, setPresenting] = useState(false)
+  const [editMode,   setEditMode]   = useState(false)
+  const [notes,      setNotes]      = useState('')
+  const [uploading,  setUploading]  = useState(false)
+  const [saving,     setSaving]     = useState(false)
+  const [error,      setError]      = useState('')
+  const [success,    setSuccess]    = useState(false)
+  const [dragOver,   setDragOver]   = useState(null)
+  const imgRef = useRef()
+  const vidRef = useRef()
 
   useEffect(() => {
     if (!project) return
     setReport(null); setLoading(true); setPresenting(false)
-    getReport(project.id).then(setReport).finally(() => setLoading(false))
+    setEditMode(false); setError(''); setSuccess(false)
+    getReport(project.id)
+      .then(r => { setReport(r); setNotes(r.notes || ''); if (r.submitted) setSuccess(true) })
+      .finally(() => setLoading(false))
   }, [project?.id])
 
   if (!project) return (
     <div style={{ flex: 1, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <span style={{ color: '#9ca3af', fontSize: 13 }}>Chọn dự án để xem chi tiết</span>
+      <span style={{ color: '#9ca3af', fontSize: 13 }}>Chọn dự án để xem báo cáo</span>
     </div>
   )
 
@@ -214,6 +221,42 @@ function DetailPanel({ project }) {
   const imageFiles = files.filter(f => f.type === 'image')
   const videoFiles = files.filter(f => f.type === 'video')
   const allSlides  = [...imageFiles, ...videoFiles]
+  const submitted  = report?.submitted || success
+
+  async function handleUpload(rawFiles) {
+    if (!rawFiles.length) return
+    setUploading(true); setError('')
+    try { await uploadFiles(project.id, Array.from(rawFiles)); setReport(await getReport(project.id)) }
+    catch (e) { setError(e.message) }
+    finally { setUploading(false) }
+  }
+
+  async function handleDelete(fid) {
+    try { await deleteFile(project.id, fid); setReport(await getReport(project.id)) }
+    catch (e) { setError(e.message) }
+  }
+
+  async function handleSaveNotes() {
+    setSaving(true)
+    try { await saveNotes(project.id, notes) }
+    catch (e) { setError(e.message) }
+    finally { setSaving(false) }
+  }
+
+  async function handleSubmit() {
+    setSaving(true); setError('')
+    try { await submitReport(project.id, notes); setSuccess(true); setEditMode(false); setReport(await getReport(project.id)) }
+    catch (e) { setError(e.message) }
+    finally { setSaving(false) }
+  }
+
+  const dropZone = (type, ref) => ({
+    onDragOver: e => { e.preventDefault(); setDragOver(type) },
+    onDragLeave: () => setDragOver(null),
+    onDrop: e => { e.preventDefault(); setDragOver(null); handleUpload(e.dataTransfer.files) },
+    onClick: () => ref.current?.click(),
+    style: { border: `2px dashed ${dragOver === type ? '#2563eb' : '#e5e7eb'}`, borderRadius: 8, padding: '18px', textAlign: 'center', cursor: 'pointer', background: dragOver === type ? '#eff6ff' : '#fafafa', marginBottom: 10, transition: 'all 0.15s' },
+  })
 
   if (presenting) return <Slideshow project={project} report={report} onClose={() => setPresenting(false)} />
 
@@ -222,6 +265,8 @@ function DetailPanel({ project }) {
   return (
     <div style={{ flex: 1, background: '#f3f4f6', overflowY: 'auto' }}>
       <div style={{ maxWidth: 680, margin: '0 auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+        {/* Project info */}
         <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
             <div>
@@ -230,80 +275,175 @@ function DetailPanel({ project }) {
             </div>
             <span style={{ fontSize: 12, fontWeight: 600, color: statusColor }}>{project.status}</span>
           </div>
-          <div style={{ display: 'flex', gap: 18 }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#2563eb' }}><CircleUser size={13} />{project.assignee}</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#9ca3af' }}><Calendar size={13} />{project.deadline}</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 18 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#2563eb' }}><CircleUser size={13} />{project.assignee}</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#9ca3af' }}><Calendar size={13} />{project.deadline}</span>
+            </div>
+            {/* Nút tạo/chỉnh sửa báo cáo */}
+            {!submitted && (
+              <button onClick={() => setEditMode(m => !m)} style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px',
+                background: editMode ? '#f3f4f6' : '#2563eb', color: editMode ? '#374151' : '#fff',
+                border: editMode ? '1px solid #d1d5db' : 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              }}>
+                <Pencil size={13} /> {editMode ? 'Hủy chỉnh sửa' : 'Tạo / Chỉnh sửa báo cáo'}
+              </button>
+            )}
           </div>
         </div>
 
         {loading && <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}><Loader2 size={20} style={{ color: '#2563eb' }} /></div>}
 
+        {error && <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '10px 14px', borderRadius: 8, fontSize: 12 }}><AlertCircle size={14} /> {error}</div>}
+        {submitted && <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#16a34a', padding: '10px 14px', borderRadius: 8, fontSize: 12 }}><CheckCircle2 size={14} /> Báo cáo đã được nộp thành công!</div>}
+
         {!loading && report && (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-              {[
-                { icon: <Image size={16} color="#3b82f6" />, val: imageFiles.length, label: 'Hình ảnh' },
-                { icon: <Video size={16} color="#7c3aed" />, val: videoFiles.length, label: 'Video' },
-                { icon: <Maximize2 size={16} color="#6b7280" />, val: allSlides.length, label: 'Tổng slide' },
-              ].map(({ icon, val, label }) => (
-                <div key={label} style={{ ...card, alignItems: 'center', padding: '14px 10px', gap: 6 }}>
-                  {icon}
-                  <div style={{ fontSize: 22, fontWeight: 700, color: '#111827', lineHeight: 1 }}>{val}</div>
-                  <div style={{ fontSize: 11, color: '#9ca3af' }}>{label}</div>
+            {/* EDIT MODE */}
+            {editMode && !submitted && (
+              <>
+                {/* Upload ảnh */}
+                <div style={card}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <Image size={15} color="#3b82f6" />
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>Upload hình ảnh</span>
+                    <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 'auto' }}>{imageFiles.length} ảnh</span>
+                  </div>
+                  <div {...dropZone('img', imgRef)}>
+                    {uploading ? <Loader2 size={18} style={{ margin: '0 auto', color: '#3b82f6' }} /> : <Upload size={18} style={{ margin: '0 auto', color: '#d1d5db' }} />}
+                    <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>Kéo thả hoặc <span style={{ color: '#2563eb', fontWeight: 500 }}>chọn ảnh</span></div>
+                    <div style={{ fontSize: 11, color: '#d1d5db', marginTop: 2 }}>JPG, PNG, WEBP</div>
+                    <input ref={imgRef} type="file" multiple accept="image/*" style={{ display: 'none' }} onChange={e => handleUpload(e.target.files)} />
+                  </div>
+                  {imageFiles.length > 0 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+                      {imageFiles.map(f => (
+                        <div key={f.id} style={{ position: 'relative', aspectRatio: '1', borderRadius: 8, overflow: 'hidden', background: '#f3f4f6' }}>
+                          <img src={getUrl(f)} alt={f.originalName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          <button onClick={() => handleDelete(f.id)} style={{ position: 'absolute', top: 3, right: 3, width: 18, height: 18, background: 'rgba(0,0,0,0.55)', border: 'none', borderRadius: '50%', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={11} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
 
-            {imageFiles.length > 0 && (
-              <div style={card}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <Image size={14} color="#3b82f6" />
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>Hình ảnh</span>
+                {/* Upload video */}
+                <div style={card}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <Video size={15} color="#7c3aed" />
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>Upload video</span>
+                    <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 'auto' }}>{videoFiles.length} video</span>
+                  </div>
+                  <div {...dropZone('vid', vidRef)}>
+                    <Upload size={18} style={{ margin: '0 auto', color: '#d1d5db' }} />
+                    <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>Kéo thả hoặc <span style={{ color: '#7c3aed', fontWeight: 500 }}>chọn video</span></div>
+                    <div style={{ fontSize: 11, color: '#d1d5db', marginTop: 2 }}>MP4, MOV, AVI</div>
+                    <input ref={vidRef} type="file" multiple accept="video/*" style={{ display: 'none' }} onChange={e => handleUpload(e.target.files)} />
+                  </div>
+                  {videoFiles.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {videoFiles.map(f => (
+                        <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#f5f3ff', borderRadius: 7, padding: '8px 12px' }}>
+                          <Video size={13} color="#7c3aed" style={{ flexShrink: 0 }} />
+                          <span style={{ fontSize: 12, color: '#374151', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.originalName}</span>
+                          <span style={{ fontSize: 11, color: '#9ca3af' }}>{(f.size / 1024 / 1024).toFixed(1)} MB</span>
+                          <button onClick={() => handleDelete(f.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', display: 'flex' }}><Trash2 size={13} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
-                  {imageFiles.map(f => (
-                    <div key={f.id} style={{ aspectRatio: '1', borderRadius: 8, overflow: 'hidden', background: '#f3f4f6' }}>
-                      <img src={getUrl(f)} alt={f.originalName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+
+                {/* Ghi chú */}
+                <div style={card}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <FileText size={15} color="#6b7280" />
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>Ghi chú báo cáo</span>
+                  </div>
+                  <textarea value={notes} onChange={e => setNotes(e.target.value)} onBlur={handleSaveNotes}
+                    placeholder="Nhập mô tả, kết quả, vấn đề gặp phải..." rows={4}
+                    style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #e5e7eb', borderRadius: 8, resize: 'none', outline: 'none', background: '#fafafa', color: '#374151', fontFamily: 'inherit' }} />
+                  <div style={{ fontSize: 11, color: '#d1d5db' }}>Tự động lưu khi rời ô nhập</div>
+                </div>
+
+                {/* Nộp báo cáo */}
+                <button onClick={handleSubmit} disabled={saving || (imageFiles.length === 0 && videoFiles.length === 0)}
+                  style={{ width: '100%', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#2563eb', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: saving || (imageFiles.length === 0 && videoFiles.length === 0) ? 'not-allowed' : 'pointer', opacity: saving || (imageFiles.length === 0 && videoFiles.length === 0) ? 0.5 : 1 }}>
+                  {saving ? <><Loader2 size={14} /> Đang nộp...</> : <><CheckCircle2 size={14} /> Hoàn tất nộp báo cáo</>}
+                </button>
+              </>
+            )}
+
+            {/* VIEW MODE */}
+            {!editMode && (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                  {[
+                    { icon: <Image size={16} color="#3b82f6" />, val: imageFiles.length, label: 'Hình ảnh' },
+                    { icon: <Video size={16} color="#7c3aed" />, val: videoFiles.length, label: 'Video' },
+                    { icon: <Maximize2 size={16} color="#6b7280" />, val: allSlides.length, label: 'Tổng slide' },
+                  ].map(({ icon, val, label }) => (
+                    <div key={label} style={{ ...card, alignItems: 'center', padding: '14px 10px', gap: 6 }}>
+                      {icon}
+                      <div style={{ fontSize: 22, fontWeight: 700, color: '#111827', lineHeight: 1 }}>{val}</div>
+                      <div style={{ fontSize: 11, color: '#9ca3af' }}>{label}</div>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
 
-            {videoFiles.length > 0 && (
-              <div style={card}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <Video size={14} color="#7c3aed" />
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>Video</span>
-                </div>
-                {videoFiles.map(f => (
-                  <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#f5f3ff', borderRadius: 7, padding: '8px 12px' }}>
-                    <Video size={13} color="#7c3aed" style={{ flexShrink: 0 }} />
-                    <span style={{ fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#374151' }}>{f.originalName}</span>
-                    <span style={{ fontSize: 11, color: '#9ca3af' }}>{(f.size / 1024 / 1024).toFixed(1)} MB</span>
+                {imageFiles.length > 0 && (
+                  <div style={card}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <Image size={14} color="#3b82f6" />
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>Hình ảnh</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+                      {imageFiles.map(f => (
+                        <div key={f.id} style={{ aspectRatio: '1', borderRadius: 8, overflow: 'hidden', background: '#f3f4f6' }}>
+                          <img src={getUrl(f)} alt={f.originalName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
-              </div>
-            )}
+                )}
 
-            {report.notes && (
-              <div style={card}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                  <FileText size={14} color="#6b7280" />
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>Ghi chú</span>
-                </div>
-                <p style={{ fontSize: 13, color: '#4b5563', lineHeight: 1.6 }}>{report.notes}</p>
-              </div>
-            )}
+                {videoFiles.length > 0 && (
+                  <div style={card}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <Video size={14} color="#7c3aed" />
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>Video</span>
+                    </div>
+                    {videoFiles.map(f => (
+                      <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#f5f3ff', borderRadius: 7, padding: '8px 12px' }}>
+                        <Video size={13} color="#7c3aed" style={{ flexShrink: 0 }} />
+                        <span style={{ fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#374151' }}>{f.originalName}</span>
+                        <span style={{ fontSize: 11, color: '#9ca3af' }}>{(f.size / 1024 / 1024).toFixed(1)} MB</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
-            {allSlides.length > 0 ? (
-              <button onClick={() => setPresenting(true)} style={{ width: '100%', padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#2563eb', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-                <Maximize2 size={15} /> Bắt đầu trình chiếu toàn màn hình
-              </button>
-            ) : (
-              <div style={{ ...card, alignItems: 'center', color: '#9ca3af', fontSize: 13, padding: 30 }}>
-                Dự án này chưa có file nào được nộp.
-              </div>
+                {report.notes && (
+                  <div style={card}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                      <FileText size={14} color="#6b7280" />
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>Ghi chú</span>
+                    </div>
+                    <p style={{ fontSize: 13, color: '#4b5563', lineHeight: 1.6 }}>{report.notes}</p>
+                  </div>
+                )}
+
+                {allSlides.length > 0 ? (
+                  <button onClick={() => setPresenting(true)} style={{ width: '100%', padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#2563eb', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                    <Maximize2 size={15} /> Bắt đầu trình chiếu toàn màn hình
+                  </button>
+                ) : (
+                  <div style={{ ...card, alignItems: 'center', color: '#9ca3af', fontSize: 13, padding: 30 }}>
+                    Dự án này chưa có file nào. Bấm <strong>"Tạo / Chỉnh sửa báo cáo"</strong> để bắt đầu.
+                  </div>
+                )}
+              </>
             )}
           </>
         )}

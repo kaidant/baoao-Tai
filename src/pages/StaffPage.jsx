@@ -8,7 +8,7 @@ const NAV = [
   { id: 'nghiem-thu', label: 'Báo cáo',  icon: ClipboardList },
 ]
 
-const TYPES    = ['Thực tập sinh', 'KS Part-time', 'KS Full-time', 'Kỹ sư PO']
+const TYPES    = ['Thực tập sinh', 'KS Part-time', 'KS Full-time', 'Kỹ sư PO', 'Account Manager', 'CEO Kinh doanh',]
 const STATUSES = ['Đang làm', 'Thử việc', 'Đã nghỉ']
 const GENDERS  = ['Nam', 'Nữ', 'Khác']
 
@@ -17,17 +17,22 @@ const TYPE_STYLE = {
   'KS Part-time':  { bg: '#f5f3ff', color: '#7c3aed', border: '#ddd6fe' },
   'KS Full-time':  { bg: '#eff6ff', color: '#2563eb', border: '#bfdbfe' },
   'Kỹ sư PO':      { bg: '#fef2f2', color: '#dc2626', border: '#fecaca' },
+  'Account Manager': { bg: '#f0fdf4', color: '#16a34a', border: '#bbf7d0' },
+  'CEO Kinh doanh': { bg: '#fdf4ff', color: '#9333ea', border: '#e9d5ff' },
 }
 const CARD_BORDER = {
   'Thực tập sinh': '#f97316',
   'KS Part-time':  '#7c3aed',
   'KS Full-time':  '#3b82f6',
   'Kỹ sư PO':      '#ef4444',
+  'Account Manager': '#16a34a',
+  'CEO Kinh doanh': '#9333ea',
 }
 
 function standardHours(type) {
   if (type === 'KS Part-time') return '120h (≥30h/tuần)'
   if (type === 'KS Full-time' || type === 'Kỹ sư PO') return '208h'
+  if (type === 'Account Manager') return '208h'
   return '—'
 }
 
