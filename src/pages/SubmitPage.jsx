@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import {
-  FolderKanban, UserSquare2, ClipboardList,
+  FolderKanban, UserSquare2, ClipboardList, FileText,
   LogOut, Search, Plus, CircleUser, Calendar,
   Image, Video, Upload, X, Trash2, CheckCircle2,
   Loader2, AlertCircle,
 } from 'lucide-react'
-import { getProjects, getReport, uploadFiles, deleteFile, saveNotes, submitReport } from '../api'
+import { getProjects, getReport, uploadFiles, deleteFile, saveNotes, submitReport, createProject } from '../api'
 import { supabase } from '../supabase'
 
 const NAV = [
@@ -14,12 +14,20 @@ const NAV = [
   { id: 'nghiem-thu', label: 'Báo cáo', icon: ClipboardList },
 ]
 
-const TABS = ['Tất cả', 'Đang thực hiện', 'Tạm dừng', 'Hoàn thành']
+const TABS     = ['Tất cả', 'Đang thực hiện', 'Tạm dừng', 'Hoàn thành']
+const PHASES   = ['Pha 1 — Phát triển mẫu', 'Pha 2 — Sản xuất', 'Pha 3 — Kiểm thử', 'Pha 4 — Nghiệm thu']
+const STATUSES = ['Đang thực hiện', 'Tạm dừng', 'Hoàn thành']
 
 function isOverdue(deadline, status) {
   if (!deadline || status === 'Hoàn thành') return false
   const [d, m, y] = deadline.split('/').map(Number)
   return new Date(y, m - 1, d) < new Date()
+}
+
+function isoToDisplay(iso) {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-')
+  return `${parseInt(d)}/${parseInt(m)}/${y}`
 }
 
 /* ── SIDEBAR ── */
@@ -30,7 +38,6 @@ function Sidebar({ active, setActive, onSwitch, onLogout }) {
         <div style={{ fontWeight: 700, color: '#fff', fontSize: 14, lineHeight: 1.2 }}>BaoCao</div>
         <div style={{ color: '#7aa3c8', fontSize: 11, marginTop: 2 }}>admin@baocao.vn</div>
       </div>
-
       <nav style={{ flex: 1, paddingTop: 6 }}>
         {NAV.map(({ id, label, icon: Icon }) => {
           const isActive = active === id
@@ -57,21 +64,110 @@ function Sidebar({ active, setActive, onSwitch, onLogout }) {
           )
         })}
       </nav>
-
       <div style={{ padding: '12px 10px' }}>
-        <button
-          type="button"
-          onClick={() => typeof onLogout === 'function' && onLogout()}
-          style={{
-            width: '100%', padding: '8px', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', gap: 8, background: '#dc2626',
-            color: '#fff', border: 'none', borderRadius: 6, fontSize: 13,
-            fontWeight: 600, cursor: 'pointer',
-          }}>
+        <button type="button" onClick={() => typeof onLogout === 'function' && onLogout()}
+          style={{ width: '100%', padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
           <LogOut size={14} /> Đăng xuất
         </button>
       </div>
     </aside>
+  )
+}
+
+/* ── CREATE PROJECT MODAL ── */
+function CreateProjectModal({ onClose, onSaved }) {
+  const [form, setForm] = useState({
+    name: '', client: '', assignee: '',
+    phase: 'Pha 1 — Phát triển mẫu', status: 'Đang thực hiện',
+    startDate: '', deadline: '', description: '',
+  })
+  const [loading, setLoading] = useState(false)
+  const [error,   setError]   = useState('')
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  async function handleSave() {
+    if (!form.name.trim()) { setError('Vui lòng nhập tên dự án'); return }
+    setLoading(true); setError('')
+    try {
+      await createProject({
+        ...form,
+        deadline:  isoToDisplay(form.deadline),
+        startDate: isoToDisplay(form.startDate) || null,
+      })
+      onSaved()
+    } catch (e) { setError(e.message) }
+    finally { setLoading(false) }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 520, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid #f3f4f6' }}>
+          <div style={{ fontWeight: 700, fontSize: 15, color: '#111827' }}>Tạo dự án mới</div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af' }}><X size={18} /></button>
+        </div>
+
+        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {error && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '8px 12px', borderRadius: 6, fontSize: 12 }}>{error}</div>}
+
+          <div>
+            <label style={lbl}>Tên dự án <span style={{ color: '#ef4444' }}>*</span></label>
+            <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="VD: Ring Cleaner — Pha 1" style={inp} />
+          </div>
+
+          <div style={grid2}>
+            <div>
+              <label style={lbl}>Khách hàng</label>
+              <input value={form.client} onChange={e => set('client', e.target.value)} placeholder="VD: Tai Huynh" style={inp} />
+            </div>
+            <div>
+              <label style={lbl}>Người phụ trách</label>
+              <input value={form.assignee} onChange={e => set('assignee', e.target.value)} placeholder="VD: Trần Duy Khải" style={inp} />
+            </div>
+          </div>
+
+          <div style={grid2}>
+            <div>
+              <label style={lbl}>Pha</label>
+              <select value={form.phase} onChange={e => set('phase', e.target.value)} style={inp}>
+                {PHASES.map(p => <option key={p}>{p}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={lbl}>Trạng thái</label>
+              <select value={form.status} onChange={e => set('status', e.target.value)} style={inp}>
+                {STATUSES.map(s => <option key={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div style={grid2}>
+            <div>
+              <label style={lbl}>Ngày bắt đầu</label>
+              <input type="date" value={form.startDate} onChange={e => set('startDate', e.target.value)} style={inp} />
+            </div>
+            <div>
+              <label style={lbl}>Deadline</label>
+              <input type="date" value={form.deadline} onChange={e => set('deadline', e.target.value)} style={inp} />
+            </div>
+          </div>
+
+          <div>
+            <label style={lbl}>Mô tả</label>
+            <textarea value={form.description} onChange={e => set('description', e.target.value)}
+              rows={3} placeholder="Mô tả ngắn về dự án..." style={{ ...inp, resize: 'vertical', fontFamily: 'inherit' }} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '14px 20px', borderTop: '1px solid #f3f4f6' }}>
+          <button onClick={onClose} style={{ padding: '8px 20px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Hủy</button>
+          <button onClick={handleSave} disabled={loading} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1 }}>
+            {loading ? 'Đang lưu...' : 'Tạo dự án'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -110,6 +206,9 @@ function ListPanel({ projects, selected, onSelect, onAdd }) {
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
+        {filtered.length === 0 && (
+          <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>Không có dự án nào</div>
+        )}
         {filtered.map(p => {
           const overdue  = isOverdue(p.deadline, p.status)
           const isActive = selected?.id === p.id
@@ -124,9 +223,11 @@ function ListPanel({ projects, selected, onSelect, onAdd }) {
               </div>
               <div style={{ fontSize: 11.5, color: '#9ca3af', marginBottom: 1 }}>{p.client}</div>
               <div style={{ fontSize: 11.5, color: '#9ca3af', marginBottom: 4 }}>{p.phase}</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: '#2563eb', marginBottom: 2 }}>
-                <CircleUser size={12} /> {p.assignee}
-              </div>
+              {p.assignee && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: '#2563eb', marginBottom: 2 }}>
+                  <CircleUser size={12} /> {p.assignee}
+                </div>
+              )}
               {p.deadline && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: overdue ? '#f97316' : '#9ca3af' }}>
                   <Calendar size={12} /> Deadline: {p.deadline}
@@ -295,20 +396,45 @@ function DetailPanel({ project }) {
 const card = { background: '#fff', borderRadius: 10, border: '1px solid #e5e7eb', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }
 const sectionHeader = { display: 'flex', alignItems: 'center', justifyContent: 'space-between' }
 const badge = (bg, color) => ({ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: bg, color })
+const lbl = { display: 'block', fontSize: 12, fontWeight: 500, color: '#6b7280', marginBottom: 4 }
+const inp = { width: '100%', padding: '7px 10px', fontSize: 13, border: '1px solid #e5e7eb', borderRadius: 6, outline: 'none', background: '#fff', color: '#111827', boxSizing: 'border-box' }
+const grid2 = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }
 
 /* ── MAIN ── */
 export default function SubmitPage({ onSwitch, onLogout }) {
-  const [projects, setProjects] = useState([])
-  const [selected, setSelected] = useState(null)
-  const [active,   setActive]   = useState('du-an')
+  const [projects,    setProjects]    = useState([])
+  const [selected,    setSelected]    = useState(null)
+  const [active,      setActive]      = useState('du-an')
+  const [showCreate,  setShowCreate]  = useState(false)
 
-  useEffect(() => { getProjects().then(setProjects).catch(console.error) }, [])
+  async function load() {
+    try { setProjects(await getProjects()) } catch (e) { console.error(e) }
+  }
+
+  useEffect(() => { load() }, [])
+
+  async function handleSaved() {
+    await load()
+    setShowCreate(false)
+  }
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       <Sidebar active={active} setActive={setActive} onSwitch={onSwitch} onLogout={onLogout} />
-      <ListPanel projects={projects} selected={selected} onSelect={setSelected} onAdd={() => {}} />
+      <ListPanel
+        projects={projects}
+        selected={selected}
+        onSelect={setSelected}
+        onAdd={() => setShowCreate(true)}
+      />
       <DetailPanel project={selected} />
+
+      {showCreate && (
+        <CreateProjectModal
+          onClose={() => setShowCreate(false)}
+          onSaved={handleSaved}
+        />
+      )}
     </div>
   )
 }
