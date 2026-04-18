@@ -1,33 +1,26 @@
 import { useState, useEffect } from 'react'
 import {
-  LayoutDashboard, Users2, FileText, ReceiptText,
-  FolderKanban, UserSquare2, ClipboardList, BarChart3,
-  LogOut, Search, CircleUser, Calendar,
+  FolderKanban, UserSquare2, ClipboardList,
+  LogOut, Search, CircleUser, Calendar, FileText,
   Image, Video, ChevronLeft, ChevronRight, X, Loader2, Maximize2,
 } from 'lucide-react'
 import { getProjects, getReport } from '../api'
-
-const API = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`
+import { supabase } from '../supabase'
 
 const NAV = [
-  { id: 'dashboard',  label: 'Dashboard',    icon: LayoutDashboard },
-  { id: 'khach',      label: 'Khách hàng',   icon: Users2 },
-  { id: 'yeu-cau',    label: 'Yêu cầu',      icon: FileText },
-  { id: 'bao-gia',    label: 'Báo giá',      icon: ReceiptText },
-  { id: 'du-an',      label: 'Dự án',        icon: FolderKanban },
-  { id: 'nhan-su',    label: 'Nhân sự',      icon: UserSquare2 },
-  { id: 'nghiem-thu', label: 'Nghiệm thu',   icon: ClipboardList },
-  { id: 'lap-bao-gia',label: 'Lập báo giá',  icon: BarChart3 },
+  { id: 'du-an',      label: 'Dự án',   icon: FolderKanban },
+  { id: 'nhan-su',    label: 'Nhân sự', icon: UserSquare2 },
+  { id: 'nghiem-thu', label: 'Báo cáo', icon: ClipboardList },
 ]
 
 function isOverdue(deadline, status) {
-  if (status === 'Hoàn thành') return false
+  if (!deadline || status === 'Hoàn thành') return false
   const [d, m, y] = deadline.split('/').map(Number)
   return new Date(y, m - 1, d) < new Date()
 }
 
-/* ── SIDEBAR ───────────────────────────────────────────── */
-function Sidebar({ onSwitch }) {
+/* ── SIDEBAR ── */
+function Sidebar({ onSwitch, onLogout }) {
   return (
     <aside style={{ width: 158, background: '#1e3a5f', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '14px 16px 12px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
@@ -39,10 +32,14 @@ function Sidebar({ onSwitch }) {
           const isActive = id === 'nghiem-thu'
           return (
             <button key={id}
-              onClick={() => { if (id === 'du-an' || id === 'yeu-cau') onSwitch() }}
+              onClick={() => {
+                if (id === 'du-an'   && typeof onSwitch === 'function') onSwitch('submit')
+                if (id === 'nhan-su' && typeof onSwitch === 'function') onSwitch('staff')
+              }}
               style={{
                 width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-                padding: '9px 16px', textAlign: 'left', fontSize: 13, fontWeight: isActive ? 600 : 400,
+                padding: '9px 16px', textAlign: 'left', fontSize: 13,
+                fontWeight: isActive ? 600 : 400,
                 color: isActive ? '#fff' : '#93b8d8',
                 background: isActive ? '#2563eb' : 'transparent',
                 border: 'none', cursor: 'pointer',
@@ -56,7 +53,10 @@ function Sidebar({ onSwitch }) {
         })}
       </nav>
       <div style={{ padding: '12px 10px' }}>
-        <button style={{ width: '100%', padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+        <button
+          type="button"
+          onClick={() => typeof onLogout === 'function' && onLogout()}
+          style={{ width: '100%', padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
           <LogOut size={14} /> Đăng xuất
         </button>
       </div>
@@ -64,12 +64,12 @@ function Sidebar({ onSwitch }) {
   )
 }
 
-/* ── LIST PANEL ───────────────────────────────────────── */
+/* ── LIST PANEL ── */
 function ListPanel({ projects, selected, onSelect }) {
   const [search, setSearch] = useState('')
   const filtered = projects.filter(p => {
     const q = search.toLowerCase()
-    return p.name.toLowerCase().includes(q) || p.client.toLowerCase().includes(q)
+    return p.name?.toLowerCase().includes(q) || p.client?.toLowerCase().includes(q)
   })
   return (
     <div style={{ width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', background: '#fff', borderRight: '1px solid #e5e7eb' }}>
@@ -82,7 +82,7 @@ function ListPanel({ projects, selected, onSelect }) {
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {filtered.map(p => {
-          const overdue = isOverdue(p.deadline, p.status)
+          const overdue  = isOverdue(p.deadline, p.status)
           const isActive = selected?.id === p.id
           const statusColor = p.status === 'Hoàn thành' ? '#16a34a' : p.status === 'Tạm dừng' ? '#d97706' : '#2563eb'
           return (
@@ -117,12 +117,17 @@ function ListPanel({ projects, selected, onSelect }) {
   )
 }
 
-/* ── SLIDESHOW ────────────────────────────────────────── */
+/* ── SLIDESHOW ── */
 function Slideshow({ project, report, onClose }) {
   const files  = report?.files || []
   const slides = [...files.filter(f => f.type === 'image'), ...files.filter(f => f.type === 'video')]
   const [idx, setIdx] = useState(0)
   const cur = slides[idx]
+
+  function getUrl(f) {
+    const { data } = supabase.storage.from(f.bucket || 'images').getPublicUrl(f.filename)
+    return data.publicUrl
+  }
 
   useEffect(() => {
     const fn = e => {
@@ -136,7 +141,6 @@ function Slideshow({ project, report, onClose }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: '#000', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 24px', background: 'linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)', position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
         <div>
           <div style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>{project.name}</div>
@@ -150,7 +154,6 @@ function Slideshow({ project, report, onClose }) {
         </div>
       </div>
 
-      {/* Slide */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '80px 70px' }}>
         <button disabled={idx === 0} onClick={() => setIdx(i => i - 1)}
           style={{ position: 'absolute', left: 16, width: 44, height: 44, background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: '50%', color: '#fff', cursor: idx === 0 ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: idx === 0 ? 0.25 : 1 }}>
@@ -158,8 +161,8 @@ function Slideshow({ project, report, onClose }) {
         </button>
 
         {cur?.type === 'image'
-          ? <img src={`${API}/uploads/${cur.filename}`} alt={cur.originalName} style={{ maxHeight: '78vh', maxWidth: '100%', objectFit: 'contain', borderRadius: 12, boxShadow: '0 25px 60px rgba(0,0,0,0.6)' }} />
-          : <video key={cur?.filename} src={`${API}/uploads/${cur?.filename}`} controls autoPlay style={{ maxHeight: '78vh', maxWidth: '100%', borderRadius: 12, boxShadow: '0 25px 60px rgba(0,0,0,0.6)' }} />
+          ? <img src={getUrl(cur)} alt={cur.originalName} style={{ maxHeight: '78vh', maxWidth: '100%', objectFit: 'contain', borderRadius: 12, boxShadow: '0 25px 60px rgba(0,0,0,0.6)' }} />
+          : <video key={cur?.filename} src={getUrl(cur)} controls autoPlay style={{ maxHeight: '78vh', maxWidth: '100%', borderRadius: 12, boxShadow: '0 25px 60px rgba(0,0,0,0.6)' }} />
         }
 
         <button disabled={idx === slides.length - 1} onClick={() => setIdx(i => i + 1)}
@@ -168,7 +171,6 @@ function Slideshow({ project, report, onClose }) {
         </button>
       </div>
 
-      {/* Footer */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, paddingBottom: 24, background: 'linear-gradient(to top, rgba(0,0,0,0.6), transparent)', paddingTop: 30 }}>
         {idx === slides.length - 1 && report?.notes && (
           <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13, textAlign: 'center', maxWidth: 500, padding: '0 16px' }}>{report.notes}</div>
@@ -185,7 +187,7 @@ function Slideshow({ project, report, onClose }) {
   )
 }
 
-/* ── DETAIL PANEL ─────────────────────────────────────── */
+/* ── DETAIL PANEL ── */
 function DetailPanel({ project }) {
   const [report,     setReport]     = useState(null)
   const [loading,    setLoading]    = useState(false)
@@ -203,6 +205,11 @@ function DetailPanel({ project }) {
     </div>
   )
 
+  function getUrl(f) {
+    const { data } = supabase.storage.from(f.bucket || 'images').getPublicUrl(f.filename)
+    return data.publicUrl
+  }
+
   const files      = report?.files || []
   const imageFiles = files.filter(f => f.type === 'image')
   const videoFiles = files.filter(f => f.type === 'video')
@@ -215,8 +222,6 @@ function DetailPanel({ project }) {
   return (
     <div style={{ flex: 1, background: '#f3f4f6', overflowY: 'auto' }}>
       <div style={{ maxWidth: 680, margin: '0 auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-
-        {/* Info */}
         <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
             <div>
@@ -235,7 +240,6 @@ function DetailPanel({ project }) {
 
         {!loading && report && (
           <>
-            {/* Stats */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
               {[
                 { icon: <Image size={16} color="#3b82f6" />, val: imageFiles.length, label: 'Hình ảnh' },
@@ -250,7 +254,6 @@ function DetailPanel({ project }) {
               ))}
             </div>
 
-            {/* Images preview */}
             {imageFiles.length > 0 && (
               <div style={card}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -260,14 +263,13 @@ function DetailPanel({ project }) {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
                   {imageFiles.map(f => (
                     <div key={f.id} style={{ aspectRatio: '1', borderRadius: 8, overflow: 'hidden', background: '#f3f4f6' }}>
-                      <img src={`${API}/uploads/${f.filename}`} alt={f.originalName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <img src={getUrl(f)} alt={f.originalName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Videos */}
             {videoFiles.length > 0 && (
               <div style={card}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -284,7 +286,6 @@ function DetailPanel({ project }) {
               </div>
             )}
 
-            {/* Notes */}
             {report.notes && (
               <div style={card}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
@@ -313,14 +314,14 @@ function DetailPanel({ project }) {
 
 const card = { background: '#fff', borderRadius: 10, border: '1px solid #e5e7eb', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }
 
-/* ── MAIN ───────────────────────────────────────────────── */
-export default function PresentPage({ onSwitch }) {
+/* ── MAIN ── */
+export default function PresentPage({ onSwitch, onLogout }) {
   const [projects, setProjects] = useState([])
   const [selected, setSelected] = useState(null)
   useEffect(() => { getProjects().then(setProjects).catch(console.error) }, [])
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Sidebar onSwitch={onSwitch} />
+      <Sidebar onSwitch={onSwitch} onLogout={onLogout} />
       <ListPanel projects={projects} selected={selected} onSelect={setSelected} />
       <DetailPanel project={selected} />
     </div>

@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import {
-  LayoutDashboard, Users2, FileText, ReceiptText,
-  FolderKanban, UserSquare2, ClipboardList, BarChart3,
+  FolderKanban, UserSquare2, ClipboardList,
   LogOut, Search, Plus, CircleUser, Calendar,
   Image, Video, Upload, X, Trash2, CheckCircle2,
   Loader2, AlertCircle,
@@ -10,14 +9,9 @@ import { getProjects, getReport, uploadFiles, deleteFile, saveNotes, submitRepor
 import { supabase } from '../supabase'
 
 const NAV = [
-  { id: 'dashboard',   label: 'Dashboard',    icon: LayoutDashboard },
-  { id: 'khach',       label: 'Khách hàng',   icon: Users2 },
-  { id: 'yeu-cau',     label: 'Yêu cầu',      icon: FileText },
-  { id: 'bao-gia',     label: 'Báo giá',      icon: ReceiptText },
-  { id: 'du-an',       label: 'Dự án',        icon: FolderKanban },
-  { id: 'nhan-su',     label: 'Nhân sự',      icon: UserSquare2 },
-  { id: 'nghiem-thu',  label: 'Nghiệm thu',   icon: ClipboardList },
-  { id: 'lap-bao-gia', label: 'Lập báo giá',  icon: BarChart3 },
+  { id: 'du-an',      label: 'Dự án',   icon: FolderKanban },
+  { id: 'nhan-su',    label: 'Nhân sự', icon: UserSquare2 },
+  { id: 'nghiem-thu', label: 'Báo cáo', icon: ClipboardList },
 ]
 
 const TABS = ['Tất cả', 'Đang thực hiện', 'Tạm dừng', 'Hoàn thành']
