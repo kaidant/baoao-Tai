@@ -4,8 +4,13 @@ import {
   LogOut, Search, CircleUser, Calendar, FileText,
   Image, Video, ChevronLeft, ChevronRight, X, Loader2, Maximize2,
   Upload, Trash2, CheckCircle2, AlertCircle, Pencil,
+  CheckSquare, Square, Clock, Plus,
 } from 'lucide-react'
-import { getProjects, getReport, uploadFiles, deleteFile, saveNotes, submitReport } from '../api'
+import {
+  getProjects, getReport, uploadFiles, deleteFile,
+  saveNotes, submitReport,
+  getTodos, createTodo, updateTodoStatus, deleteTodo,
+} from '../api'
 import { supabase } from '../supabase'
 
 const NAV = [
@@ -71,7 +76,7 @@ function ListPanel({ projects, selected, onSelect }) {
     return p.name?.toLowerCase().includes(q) || p.client?.toLowerCase().includes(q)
   })
   return (
-    <div style={{ width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', background: '#fff', borderRight: '1px solid #e5e7eb' }}>
+    <div style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', background: '#fff', borderRight: '1px solid #e5e7eb' }}>
       <div style={{ padding: '10px 10px 8px' }}>
         <div style={{ position: 'relative' }}>
           <Search size={13} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: '#9ca3af' }} />
@@ -111,6 +116,202 @@ function ListPanel({ projects, selected, onSelect }) {
             </button>
           )
         })}
+      </div>
+    </div>
+  )
+}
+
+/* ── TODO PANEL ── */
+function TodoPanel({ project }) {
+  const [todos,       setTodos]       = useState([])
+  const [loading,     setLoading]     = useState(false)
+  const [showAdd,     setShowAdd]     = useState(false)
+  const [newContent,  setNewContent]  = useState('')
+  const [newAssignee, setNewAssignee] = useState('')
+  const [newDeadline, setNewDeadline] = useState('')
+  const [newNote,     setNewNote]     = useState('')
+  const [filterTab,   setFilterTab]   = useState('Tất cả')
+  const [saving,      setSaving]      = useState(false)
+
+  useEffect(() => {
+    if (!project) return
+    setLoading(true)
+    getTodos(project.id).then(setTodos).catch(console.error).finally(() => setLoading(false))
+  }, [project?.id])
+
+  if (!project) return (
+    <div style={{ width: 280, flexShrink: 0, background: '#f9fafb', borderLeft: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <span style={{ color: '#d1d5db', fontSize: 12, textAlign: 'center', padding: 16 }}>Chọn dự án để xem todo list</span>
+    </div>
+  )
+
+  const filtered   = todos.filter(t => filterTab === 'Tất cả' || t.status === filterTab)
+  const countDone  = todos.filter(t => t.status === 'Hoàn thành').length
+
+  async function handleAdd() {
+    if (!newContent.trim()) return
+    setSaving(true)
+    try {
+      const todo = await createTodo(project.id, {
+        content:      newContent.trim(),
+        assignee:     newAssignee.trim() || null,
+        deadline:     newDeadline || null,
+        note:         newNote.trim() || null,
+        status:       'Chưa làm',
+        created_by:   'CEO',
+        meeting_date: new Date().toISOString().split('T')[0],
+      })
+      setTodos(prev => [...prev, todo])
+      setNewContent(''); setNewAssignee(''); setNewDeadline(''); setNewNote('')
+      setShowAdd(false)
+    } catch (e) { alert(e.message) }
+    finally { setSaving(false) }
+  }
+
+  async function handleToggle(todo) {
+    const next = todo.status === 'Hoàn thành' ? 'Chưa làm'
+               : todo.status === 'Chưa làm'   ? 'Đang làm'
+               : 'Hoàn thành'
+    try {
+      const updated = await updateTodoStatus(todo.id, next)
+      setTodos(prev => prev.map(t => t.id === todo.id ? updated : t))
+    } catch (e) { alert(e.message) }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm('Xóa task này?')) return
+    try {
+      await deleteTodo(id)
+      setTodos(prev => prev.filter(t => t.id !== id))
+    } catch (e) { alert(e.message) }
+  }
+
+  function statusIcon(status) {
+    if (status === 'Hoàn thành') return <CheckSquare size={15} color="#16a34a" />
+    if (status === 'Đang làm')   return <Clock size={15} color="#d97706" />
+    return <Square size={15} color="#9ca3af" />
+  }
+
+  function statusBg(status) {
+    if (status === 'Hoàn thành') return '#f0fdf4'
+    if (status === 'Đang làm')   return '#fffbeb'
+    return '#fff'
+  }
+
+  return (
+    <div style={{ width: 280, flexShrink: 0, background: '#f9fafb', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <div style={{ padding: '12px 14px 8px', borderBottom: '1px solid #e5e7eb', background: '#fff' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <CheckSquare size={14} color="#2563eb" />
+            <span style={{ fontWeight: 700, fontSize: 13, color: '#111827' }}>Todo List</span>
+            <span style={{ fontSize: 11, color: '#9ca3af' }}>{countDone}/{todos.length}</span>
+          </div>
+          <button onClick={() => setShowAdd(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+            <Plus size={12} /> Thêm
+          </button>
+        </div>
+
+        {/* Progress bar */}
+        <div style={{ height: 4, background: '#e5e7eb', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${todos.length ? (countDone / todos.length) * 100 : 0}%`, background: '#16a34a', borderRadius: 2, transition: 'width 0.3s' }} />
+        </div>
+
+        {/* Filter tabs */}
+        <div style={{ display: 'flex', gap: 3, marginTop: 8 }}>
+          {['Tất cả', 'Chưa làm', 'Đang làm', 'Hoàn thành'].map(t => (
+            <button key={t} onClick={() => setFilterTab(t)} style={{ padding: '2px 7px', fontSize: 11, fontWeight: filterTab === t ? 600 : 400, background: filterTab === t ? '#2563eb' : 'transparent', color: filterTab === t ? '#fff' : '#6b7280', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+              {t}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Add form — CEO có thêm trường note */}
+      {showAdd && (
+        <div style={{ padding: '10px 14px', borderBottom: '1px solid #e5e7eb', background: '#fff', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <textarea value={newContent} onChange={e => setNewContent(e.target.value)}
+            placeholder="Nội dung vấn đề / task..." rows={2}
+            style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 6, resize: 'none', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+          <input value={newAssignee} onChange={e => setNewAssignee(e.target.value)}
+            placeholder="Giao cho (KS PO, KS thành viên...)"
+            style={inpSm} />
+          <input type="date" value={newDeadline} onChange={e => setNewDeadline(e.target.value)} style={inpSm} />
+          <textarea value={newNote} onChange={e => setNewNote(e.target.value)}
+            placeholder="Ghi chú thêm của CEO..." rows={2}
+            style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 6, resize: 'none', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', background: '#fffbeb' }} />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={handleAdd} disabled={saving || !newContent.trim()}
+              style={{ flex: 1, padding: '6px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 700, cursor: saving || !newContent.trim() ? 'not-allowed' : 'pointer', opacity: saving || !newContent.trim() ? 0.6 : 1 }}>
+              {saving ? 'Đang lưu...' : 'Lưu'}
+            </button>
+            <button onClick={() => { setShowAdd(false); setNewContent(''); setNewAssignee(''); setNewDeadline(''); setNewNote('') }}
+              style={{ padding: '6px 12px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 5, fontSize: 12, cursor: 'pointer' }}>
+              Hủy
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Todo list */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {loading && <div style={{ textAlign: 'center', padding: 20 }}><Loader2 size={16} style={{ color: '#2563eb' }} /></div>}
+        {!loading && filtered.length === 0 && (
+          <div style={{ textAlign: 'center', color: '#9ca3af', fontSize: 12, padding: 24 }}>
+            {filterTab === 'Tất cả' ? 'Chưa có task nào' : `Không có task "${filterTab}"`}
+          </div>
+        )}
+        {filtered.map(todo => (
+          <div key={todo.id} style={{ background: statusBg(todo.status), borderRadius: 8, padding: '8px 10px', border: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <button onClick={() => handleToggle(todo)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, marginTop: 1 }}>
+                {statusIcon(todo.status)}
+              </button>
+              <span style={{ flex: 1, fontSize: 12, color: '#111827', lineHeight: 1.4, textDecoration: todo.status === 'Hoàn thành' ? 'line-through' : 'none', opacity: todo.status === 'Hoàn thành' ? 0.6 : 1 }}>
+                {todo.content}
+              </span>
+              <button onClick={() => handleDelete(todo.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', padding: 0, flexShrink: 0 }}>
+                <X size={12} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, paddingLeft: 23, flexWrap: 'wrap' }}>
+              {todo.assignee && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#2563eb' }}>
+                  <CircleUser size={11} /> {todo.assignee}
+                </span>
+              )}
+              {todo.deadline && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#9ca3af' }}>
+                  <Calendar size={11} /> {todo.deadline}
+                </span>
+              )}
+              {todo.created_by && (
+                <span style={{ fontSize: 10, color: '#9ca3af', fontStyle: 'italic' }}>
+                  bởi {todo.created_by}
+                </span>
+              )}
+            </div>
+
+            {/* Note của CEO */}
+            {todo.note && (
+              <div style={{ paddingLeft: 23, fontSize: 11, color: '#d97706', background: '#fffbeb', borderRadius: 4, padding: '3px 6px 3px 23px', marginTop: 2 }}>
+                📝 {todo.note}
+              </div>
+            )}
+
+            <div style={{ paddingLeft: 23 }}>
+              <span style={{
+                fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 10,
+                background: todo.status === 'Hoàn thành' ? '#dcfce7' : todo.status === 'Đang làm' ? '#fef9c3' : '#f3f4f6',
+                color:      todo.status === 'Hoàn thành' ? '#16a34a' : todo.status === 'Đang làm' ? '#d97706' : '#9ca3af',
+              }}>
+                {todo.status}
+              </span>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -230,19 +431,16 @@ function DetailPanel({ project }) {
     catch (e) { setError(e.message) }
     finally { setUploading(false) }
   }
-
   async function handleDelete(fid) {
     try { await deleteFile(project.id, fid); setReport(await getReport(project.id)) }
     catch (e) { setError(e.message) }
   }
-
   async function handleSaveNotes() {
     setSaving(true)
     try { await saveNotes(project.id, notes) }
     catch (e) { setError(e.message) }
     finally { setSaving(false) }
   }
-
   async function handleSubmit() {
     setSaving(true); setError('')
     try { await submitReport(project.id, notes); setSuccess(true); setEditMode(false); setReport(await getReport(project.id)) }
@@ -264,9 +462,7 @@ function DetailPanel({ project }) {
 
   return (
     <div style={{ flex: 1, background: '#f3f4f6', overflowY: 'auto' }}>
-      <div style={{ maxWidth: 680, margin: '0 auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-
-        {/* Project info */}
+      <div style={{ maxWidth: 580, margin: '0 auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
             <div>
@@ -280,30 +476,22 @@ function DetailPanel({ project }) {
               <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#2563eb' }}><CircleUser size={13} />{project.assignee}</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#9ca3af' }}><Calendar size={13} />{project.deadline}</span>
             </div>
-            {/* Nút tạo/chỉnh sửa báo cáo */}
             {!submitted && (
-              <button onClick={() => setEditMode(m => !m)} style={{
-                display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px',
-                background: editMode ? '#f3f4f6' : '#2563eb', color: editMode ? '#374151' : '#fff',
-                border: editMode ? '1px solid #d1d5db' : 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              }}>
-                <Pencil size={13} /> {editMode ? 'Hủy chỉnh sửa' : 'Tạo / Chỉnh sửa báo cáo'}
+              <button onClick={() => setEditMode(m => !m)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', background: editMode ? '#f3f4f6' : '#2563eb', color: editMode ? '#374151' : '#fff', border: editMode ? '1px solid #d1d5db' : 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                <Pencil size={13} /> {editMode ? 'Hủy' : 'Tạo / Chỉnh sửa báo cáo'}
               </button>
             )}
           </div>
         </div>
 
         {loading && <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}><Loader2 size={20} style={{ color: '#2563eb' }} /></div>}
-
         {error && <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '10px 14px', borderRadius: 8, fontSize: 12 }}><AlertCircle size={14} /> {error}</div>}
         {submitted && <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#16a34a', padding: '10px 14px', borderRadius: 8, fontSize: 12 }}><CheckCircle2 size={14} /> Báo cáo đã được nộp thành công!</div>}
 
         {!loading && report && (
           <>
-            {/* EDIT MODE */}
             {editMode && !submitted && (
               <>
-                {/* Upload ảnh */}
                 <div style={card}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                     <Image size={15} color="#3b82f6" />
@@ -313,11 +501,10 @@ function DetailPanel({ project }) {
                   <div {...dropZone('img', imgRef)}>
                     {uploading ? <Loader2 size={18} style={{ margin: '0 auto', color: '#3b82f6' }} /> : <Upload size={18} style={{ margin: '0 auto', color: '#d1d5db' }} />}
                     <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>Kéo thả hoặc <span style={{ color: '#2563eb', fontWeight: 500 }}>chọn ảnh</span></div>
-                    <div style={{ fontSize: 11, color: '#d1d5db', marginTop: 2 }}>JPG, PNG, WEBP</div>
                     <input ref={imgRef} type="file" multiple accept="image/*" style={{ display: 'none' }} onChange={e => handleUpload(e.target.files)} />
                   </div>
                   {imageFiles.length > 0 && (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
                       {imageFiles.map(f => (
                         <div key={f.id} style={{ position: 'relative', aspectRatio: '1', borderRadius: 8, overflow: 'hidden', background: '#f3f4f6' }}>
                           <img src={getUrl(f)} alt={f.originalName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -328,46 +515,35 @@ function DetailPanel({ project }) {
                   )}
                 </div>
 
-                {/* Upload video */}
                 <div style={card}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                     <Video size={15} color="#7c3aed" />
                     <span style={{ fontWeight: 600, fontSize: 13 }}>Upload video</span>
-                    <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 'auto' }}>{videoFiles.length} video</span>
                   </div>
                   <div {...dropZone('vid', vidRef)}>
                     <Upload size={18} style={{ margin: '0 auto', color: '#d1d5db' }} />
                     <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>Kéo thả hoặc <span style={{ color: '#7c3aed', fontWeight: 500 }}>chọn video</span></div>
-                    <div style={{ fontSize: 11, color: '#d1d5db', marginTop: 2 }}>MP4, MOV, AVI</div>
                     <input ref={vidRef} type="file" multiple accept="video/*" style={{ display: 'none' }} onChange={e => handleUpload(e.target.files)} />
                   </div>
-                  {videoFiles.length > 0 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {videoFiles.map(f => (
-                        <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#f5f3ff', borderRadius: 7, padding: '8px 12px' }}>
-                          <Video size={13} color="#7c3aed" style={{ flexShrink: 0 }} />
-                          <span style={{ fontSize: 12, color: '#374151', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.originalName}</span>
-                          <span style={{ fontSize: 11, color: '#9ca3af' }}>{(f.size / 1024 / 1024).toFixed(1)} MB</span>
-                          <button onClick={() => handleDelete(f.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', display: 'flex' }}><Trash2 size={13} /></button>
-                        </div>
-                      ))}
+                  {videoFiles.length > 0 && videoFiles.map(f => (
+                    <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#f5f3ff', borderRadius: 7, padding: '8px 12px' }}>
+                      <Video size={13} color="#7c3aed" style={{ flexShrink: 0 }} />
+                      <span style={{ fontSize: 12, color: '#374151', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.originalName}</span>
+                      <button onClick={() => handleDelete(f.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', display: 'flex' }}><Trash2 size={13} /></button>
                     </div>
-                  )}
+                  ))}
                 </div>
 
-                {/* Ghi chú */}
                 <div style={card}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                     <FileText size={15} color="#6b7280" />
                     <span style={{ fontWeight: 600, fontSize: 13 }}>Ghi chú báo cáo</span>
                   </div>
                   <textarea value={notes} onChange={e => setNotes(e.target.value)} onBlur={handleSaveNotes}
-                    placeholder="Nhập mô tả, kết quả, vấn đề gặp phải..." rows={4}
+                    placeholder="Nhập mô tả, kết quả, vấn đề..." rows={3}
                     style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #e5e7eb', borderRadius: 8, resize: 'none', outline: 'none', background: '#fafafa', color: '#374151', fontFamily: 'inherit' }} />
-                  <div style={{ fontSize: 11, color: '#d1d5db' }}>Tự động lưu khi rời ô nhập</div>
                 </div>
 
-                {/* Nộp báo cáo */}
                 <button onClick={handleSubmit} disabled={saving || (imageFiles.length === 0 && videoFiles.length === 0)}
                   style={{ width: '100%', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#2563eb', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: saving || (imageFiles.length === 0 && videoFiles.length === 0) ? 'not-allowed' : 'pointer', opacity: saving || (imageFiles.length === 0 && videoFiles.length === 0) ? 0.5 : 1 }}>
                   {saving ? <><Loader2 size={14} /> Đang nộp...</> : <><CheckCircle2 size={14} /> Hoàn tất nộp báo cáo</>}
@@ -375,7 +551,6 @@ function DetailPanel({ project }) {
               </>
             )}
 
-            {/* VIEW MODE */}
             {!editMode && (
               <>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
@@ -395,10 +570,9 @@ function DetailPanel({ project }) {
                 {imageFiles.length > 0 && (
                   <div style={card}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <Image size={14} color="#3b82f6" />
-                      <span style={{ fontWeight: 600, fontSize: 13 }}>Hình ảnh</span>
+                      <Image size={14} color="#3b82f6" /><span style={{ fontWeight: 600, fontSize: 13 }}>Hình ảnh</span>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
                       {imageFiles.map(f => (
                         <div key={f.id} style={{ aspectRatio: '1', borderRadius: 8, overflow: 'hidden', background: '#f3f4f6' }}>
                           <img src={getUrl(f)} alt={f.originalName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -411,8 +585,7 @@ function DetailPanel({ project }) {
                 {videoFiles.length > 0 && (
                   <div style={card}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <Video size={14} color="#7c3aed" />
-                      <span style={{ fontWeight: 600, fontSize: 13 }}>Video</span>
+                      <Video size={14} color="#7c3aed" /><span style={{ fontWeight: 600, fontSize: 13 }}>Video</span>
                     </div>
                     {videoFiles.map(f => (
                       <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#f5f3ff', borderRadius: 7, padding: '8px 12px' }}>
@@ -427,8 +600,7 @@ function DetailPanel({ project }) {
                 {report.notes && (
                   <div style={card}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                      <FileText size={14} color="#6b7280" />
-                      <span style={{ fontWeight: 600, fontSize: 13 }}>Ghi chú</span>
+                      <FileText size={14} color="#6b7280" /><span style={{ fontWeight: 600, fontSize: 13 }}>Ghi chú</span>
                     </div>
                     <p style={{ fontSize: 13, color: '#4b5563', lineHeight: 1.6 }}>{report.notes}</p>
                   </div>
@@ -452,7 +624,8 @@ function DetailPanel({ project }) {
   )
 }
 
-const card = { background: '#fff', borderRadius: 10, border: '1px solid #e5e7eb', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }
+const card  = { background: '#fff', borderRadius: 10, border: '1px solid #e5e7eb', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }
+const inpSm = { width: '100%', padding: '5px 8px', fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 6, outline: 'none', background: '#fff', color: '#111827', boxSizing: 'border-box' }
 
 /* ── MAIN ── */
 export default function PresentPage({ onSwitch, onLogout }) {
@@ -464,6 +637,7 @@ export default function PresentPage({ onSwitch, onLogout }) {
       <Sidebar onSwitch={onSwitch} onLogout={onLogout} />
       <ListPanel projects={projects} selected={selected} onSelect={setSelected} />
       <DetailPanel project={selected} />
+      <TodoPanel project={selected} />
     </div>
   )
 }

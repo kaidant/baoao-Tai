@@ -237,3 +237,61 @@ export async function deleteStaff(id) {
   const { error } = await supabase.from('Staff').delete().eq('id', id)
   if (error) throw new Error('Xóa nhân sự thất bại')
 }
+
+// ── Todos ─────────────────────────────────────────────────────
+
+export async function getTodos(projectId) {
+  const { data, error } = await supabase
+    .from('todos')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: true })
+  if (error) throw new Error('Không tải được todo list')
+  return data || []
+}
+
+export async function createTodo(projectId, payload) {
+  const { data, error } = await supabase
+    .from('todos')
+    .insert([{
+      project_id:   projectId,
+      content:      payload.content,
+      assignee:     payload.assignee     || null,
+      deadline:     payload.deadline     || null,
+      status:       payload.status       || 'Chưa làm',
+      created_by:   payload.created_by   || null,
+      meeting_date: payload.meeting_date || null,
+      note:         payload.note         || null,
+    }])
+    .select()
+    .single()
+  if (error) throw new Error('Tạo todo thất bại')
+  return data
+}
+
+export async function updateTodo(id, payload) {
+  const { data, error } = await supabase
+    .from('todos')
+    .update({ ...payload, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw new Error('Cập nhật todo thất bại')
+  return data
+}
+
+export async function deleteTodo(id) {
+  const { error } = await supabase.from('todos').delete().eq('id', id)
+  if (error) throw new Error('Xóa todo thất bại')
+}
+
+export async function updateTodoStatus(id, status) {
+  const { data, error } = await supabase
+    .from('todos')
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw new Error('Cập nhật trạng thái thất bại')
+  return data
+}
