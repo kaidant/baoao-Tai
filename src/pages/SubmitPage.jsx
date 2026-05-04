@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import {
-  FolderKanban, UserSquare2, ClipboardList, FileText,
+  FolderKanban, UserSquare2, ClipboardList, History, FileText,
   LogOut, Search, Plus, CircleUser, Calendar,
   Image, Video, Upload, X, Trash2, CheckCircle2,
-  Loader2, AlertCircle, CheckSquare, Square, Clock,
+  Loader2, AlertCircle, CheckSquare, Square, Clock, Shield,
 } from 'lucide-react'
 import {
   getProjects, getReport, uploadFiles, deleteFile,
@@ -13,15 +13,15 @@ import {
 import { supabase } from '../supabase'
 
 const NAV = [
-  { id: 'du-an',      label: 'Dự án',   icon: FolderKanban },
-  { id: 'nhan-su',    label: 'Nhân sự', icon: UserSquare2 },
-  { id: 'nghiem-thu', label: 'Báo cáo', icon: ClipboardList },
+  { id: 'du-an',      label: 'Dự án',        icon: FolderKanban },
+  { id: 'nhan-su',    label: 'Nhân sự',       icon: UserSquare2 },
+  { id: 'nghiem-thu', label: 'Báo cáo',       icon: ClipboardList },
+  { id: 'lich-su',    label: 'Lịch sử họp',   icon: History },
 ]
 
 const TABS     = ['Tất cả', 'Đang thực hiện', 'Tạm dừng', 'Hoàn thành']
 const PHASES   = ['Pha 1 — Phát triển mẫu', 'Pha 2 — Sản xuất', 'Pha 3 — Kiểm thử', 'Pha 4 — Nghiệm thu']
 const STATUSES = ['Đang thực hiện', 'Tạm dừng', 'Hoàn thành']
-const TODO_STATUSES = ['Chưa làm', 'Đang làm', 'Hoàn thành']
 
 function isOverdue(deadline, status) {
   if (!deadline || status === 'Hoàn thành') return false
@@ -36,12 +36,18 @@ function isoToDisplay(iso) {
 }
 
 /* ── SIDEBAR ── */
-function Sidebar({ active, setActive, onSwitch, onLogout }) {
+function Sidebar({ active, setActive, onSwitch, onLogout, user }) {
   return (
     <aside style={{ width: 158, background: '#1e3a5f', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '14px 16px 12px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
         <div style={{ fontWeight: 700, color: '#fff', fontSize: 14, lineHeight: 1.2 }}>BaoCao</div>
-        <div style={{ color: '#7aa3c8', fontSize: 11, marginTop: 2 }}>admin@baocao.vn</div>
+        <div style={{ color: '#7aa3c8', fontSize: 11, marginTop: 2 }}>{user?.email || 'admin@baocao.vn'}</div>
+        {/* Role badge */}
+        <div style={{ marginTop: 4 }}>
+          <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 10, background: user?.role === 'admin' ? '#2563eb' : '#16a34a', color: '#fff' }}>
+            {user?.role === 'admin' ? '⚡ Admin' : '👤 Kỹ sư'}
+          </span>
+        </div>
       </div>
       <nav style={{ flex: 1, paddingTop: 6 }}>
         {NAV.map(({ id, label, icon: Icon }) => {
@@ -52,6 +58,7 @@ function Sidebar({ active, setActive, onSwitch, onLogout }) {
                 setActive(id)
                 if (id === 'nghiem-thu' && typeof onSwitch === 'function') onSwitch('present')
                 if (id === 'nhan-su'    && typeof onSwitch === 'function') onSwitch('staff')
+                if (id === 'lich-su'    && typeof onSwitch === 'function') onSwitch('meeting')
               }}
               style={{
                 width: '100%', display: 'flex', alignItems: 'center', gap: 10,
@@ -146,7 +153,7 @@ function CreateProjectModal({ onClose, onSaved }) {
 }
 
 /* ── PROJECT LIST PANEL ── */
-function ListPanel({ projects, selected, onSelect, onAdd }) {
+function ListPanel({ projects, selected, onSelect, onAdd, isAdmin }) {
   const [search, setSearch] = useState('')
   const [tab, setTab]       = useState('Tất cả')
 
@@ -165,6 +172,7 @@ function ListPanel({ projects, selected, onSelect, onAdd }) {
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Tìm kiếm..."
               style={{ width: '100%', paddingLeft: 26, paddingRight: 8, paddingTop: 6, paddingBottom: 6, fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 5, outline: 'none', background: '#f9fafb', color: '#374151' }} />
           </div>
+          {/* Chỉ admin và staff được tạo dự án */}
           <button onClick={onAdd} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
             <Plus size={13} /> Thêm
           </button>
@@ -177,9 +185,19 @@ function ListPanel({ projects, selected, onSelect, onAdd }) {
           ))}
         </div>
         {search && <button onClick={() => setSearch('')} style={{ fontSize: 11, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', marginTop: 4 }}>Hủy</button>}
+        {/* Thông báo khi staff xem dự án được phân công */}
+        {!isAdmin && (
+          <div style={{ marginTop: 6, fontSize: 11, color: '#d97706', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 4, padding: '3px 8px' }}>
+            📋 Hiển thị dự án của bạn
+          </div>
+        )}
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        {filtered.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>Không có dự án nào</div>}
+        {filtered.length === 0 && (
+          <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+            {isAdmin ? 'Không có dự án nào' : 'Bạn chưa được phân công dự án nào'}
+          </div>
+        )}
         {filtered.map(p => {
           const overdue  = isOverdue(p.deadline, p.status)
           const isActive = selected?.id === p.id
@@ -227,19 +245,14 @@ function TodoPanel({ project }) {
     </div>
   )
 
-  const filtered = todos.filter(t => filterTab === 'Tất cả' || t.status === filterTab)
+  const filtered  = todos.filter(t => filterTab === 'Tất cả' || t.status === filterTab)
   const countDone = todos.filter(t => t.status === 'Hoàn thành').length
 
   async function handleAdd() {
     if (!newContent.trim()) return
     setSaving(true)
     try {
-      const todo = await createTodo(project.id, {
-        content:  newContent.trim(),
-        assignee: newAssignee.trim() || null,
-        deadline: newDeadline || null,
-        status:   'Chưa làm',
-      })
+      const todo = await createTodo(project.id, { content: newContent.trim(), assignee: newAssignee.trim() || null, deadline: newDeadline || null, status: 'Chưa làm' })
       setTodos(prev => [...prev, todo])
       setNewContent(''); setNewAssignee(''); setNewDeadline('')
       setShowAdd(false)
@@ -248,9 +261,7 @@ function TodoPanel({ project }) {
   }
 
   async function handleToggle(todo) {
-    const next = todo.status === 'Hoàn thành' ? 'Chưa làm'
-               : todo.status === 'Chưa làm'   ? 'Đang làm'
-               : 'Hoàn thành'
+    const next = todo.status === 'Hoàn thành' ? 'Chưa làm' : todo.status === 'Chưa làm' ? 'Đang làm' : 'Hoàn thành'
     try {
       const updated = await updateTodoStatus(todo.id, next)
       setTodos(prev => prev.map(t => t.id === todo.id ? updated : t))
@@ -259,27 +270,18 @@ function TodoPanel({ project }) {
 
   async function handleDelete(id) {
     if (!confirm('Xóa task này?')) return
-    try {
-      await deleteTodo(id)
-      setTodos(prev => prev.filter(t => t.id !== id))
-    } catch (e) { alert(e.message) }
+    try { await deleteTodo(id); setTodos(prev => prev.filter(t => t.id !== id)) }
+    catch (e) { alert(e.message) }
   }
 
-  function statusIcon(status) {
-    if (status === 'Hoàn thành') return <CheckSquare size={15} color="#16a34a" />
-    if (status === 'Đang làm')   return <Clock size={15} color="#d97706" />
+  function statusIcon(s) {
+    if (s === 'Hoàn thành') return <CheckSquare size={15} color="#16a34a" />
+    if (s === 'Đang làm')   return <Clock size={15} color="#d97706" />
     return <Square size={15} color="#9ca3af" />
-  }
-
-  function statusColor(status) {
-    if (status === 'Hoàn thành') return '#f0fdf4'
-    if (status === 'Đang làm')   return '#fffbeb'
-    return '#fff'
   }
 
   return (
     <div style={{ width: 280, flexShrink: 0, background: '#f9fafb', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
       <div style={{ padding: '12px 14px 8px', borderBottom: '1px solid #e5e7eb', background: '#fff' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -291,86 +293,48 @@ function TodoPanel({ project }) {
             <Plus size={12} /> Thêm
           </button>
         </div>
-
-        {/* Progress bar */}
         <div style={{ height: 4, background: '#e5e7eb', borderRadius: 2, overflow: 'hidden' }}>
           <div style={{ height: '100%', width: `${todos.length ? (countDone / todos.length) * 100 : 0}%`, background: '#16a34a', borderRadius: 2, transition: 'width 0.3s' }} />
         </div>
-
-        {/* Filter tabs */}
         <div style={{ display: 'flex', gap: 3, marginTop: 8 }}>
           {['Tất cả', 'Chưa làm', 'Đang làm', 'Hoàn thành'].map(t => (
-            <button key={t} onClick={() => setFilterTab(t)} style={{ padding: '2px 7px', fontSize: 11, fontWeight: filterTab === t ? 600 : 400, background: filterTab === t ? '#2563eb' : 'transparent', color: filterTab === t ? '#fff' : '#6b7280', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
-              {t}
-            </button>
+            <button key={t} onClick={() => setFilterTab(t)} style={{ padding: '2px 7px', fontSize: 11, fontWeight: filterTab === t ? 600 : 400, background: filterTab === t ? '#2563eb' : 'transparent', color: filterTab === t ? '#fff' : '#6b7280', border: 'none', borderRadius: 4, cursor: 'pointer' }}>{t}</button>
           ))}
         </div>
       </div>
 
-      {/* Add form */}
       {showAdd && (
         <div style={{ padding: '10px 14px', borderBottom: '1px solid #e5e7eb', background: '#fff', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <textarea
-            value={newContent} onChange={e => setNewContent(e.target.value)}
-            placeholder="Nội dung task..."
-            rows={2}
-            style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 6, resize: 'none', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
-          />
-          <input value={newAssignee} onChange={e => setNewAssignee(e.target.value)} placeholder="Giao cho..." style={{ ...inpSm }} />
-          <input type="date" value={newDeadline} onChange={e => setNewDeadline(e.target.value)} style={{ ...inpSm }} />
+          <textarea value={newContent} onChange={e => setNewContent(e.target.value)} placeholder="Nội dung task..." rows={2}
+            style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 6, resize: 'none', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+          <input value={newAssignee} onChange={e => setNewAssignee(e.target.value)} placeholder="Giao cho..." style={inpSm} />
+          <input type="date" value={newDeadline} onChange={e => setNewDeadline(e.target.value)} style={inpSm} />
           <div style={{ display: 'flex', gap: 6 }}>
             <button onClick={handleAdd} disabled={saving || !newContent.trim()} style={{ flex: 1, padding: '6px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 700, cursor: saving || !newContent.trim() ? 'not-allowed' : 'pointer', opacity: saving || !newContent.trim() ? 0.6 : 1 }}>
               {saving ? 'Đang lưu...' : 'Lưu'}
             </button>
-            <button onClick={() => { setShowAdd(false); setNewContent(''); setNewAssignee(''); setNewDeadline('') }} style={{ padding: '6px 12px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 5, fontSize: 12, cursor: 'pointer' }}>
-              Hủy
-            </button>
+            <button onClick={() => { setShowAdd(false); setNewContent(''); setNewAssignee(''); setNewDeadline('') }}
+              style={{ padding: '6px 12px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 5, fontSize: 12, cursor: 'pointer' }}>Hủy</button>
           </div>
         </div>
       )}
 
-      {/* Todo list */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
         {loading && <div style={{ textAlign: 'center', padding: 20 }}><Loader2 size={16} style={{ color: '#2563eb' }} /></div>}
-        {!loading && filtered.length === 0 && (
-          <div style={{ textAlign: 'center', color: '#9ca3af', fontSize: 12, padding: 24 }}>
-            {filterTab === 'Tất cả' ? 'Chưa có task nào' : `Không có task "${filterTab}"`}
-          </div>
-        )}
+        {!loading && filtered.length === 0 && <div style={{ textAlign: 'center', color: '#9ca3af', fontSize: 12, padding: 24 }}>{filterTab === 'Tất cả' ? 'Chưa có task nào' : `Không có task "${filterTab}"`}</div>}
         {filtered.map(todo => (
-          <div key={todo.id} style={{ background: statusColor(todo.status), borderRadius: 8, padding: '8px 10px', border: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div key={todo.id} style={{ background: todo.status === 'Hoàn thành' ? '#f0fdf4' : todo.status === 'Đang làm' ? '#fffbeb' : '#fff', borderRadius: 8, padding: '8px 10px', border: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-              <button onClick={() => handleToggle(todo)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, marginTop: 1 }}>
-                {statusIcon(todo.status)}
-              </button>
-              <span style={{ flex: 1, fontSize: 12, color: '#111827', lineHeight: 1.4, textDecoration: todo.status === 'Hoàn thành' ? 'line-through' : 'none', opacity: todo.status === 'Hoàn thành' ? 0.6 : 1 }}>
-                {todo.content}
-              </span>
-              <button onClick={() => handleDelete(todo.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', padding: 0, flexShrink: 0 }}>
-                <X size={12} />
-              </button>
+              <button onClick={() => handleToggle(todo)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, marginTop: 1 }}>{statusIcon(todo.status)}</button>
+              <span style={{ flex: 1, fontSize: 12, color: '#111827', lineHeight: 1.4, textDecoration: todo.status === 'Hoàn thành' ? 'line-through' : 'none', opacity: todo.status === 'Hoàn thành' ? 0.6 : 1 }}>{todo.content}</span>
+              <button onClick={() => handleDelete(todo.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', padding: 0, flexShrink: 0 }}><X size={12} /></button>
             </div>
             <div style={{ display: 'flex', gap: 8, paddingLeft: 23 }}>
-              {todo.assignee && (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#2563eb' }}>
-                  <CircleUser size={11} /> {todo.assignee}
-                </span>
-              )}
-              {todo.deadline && (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#9ca3af' }}>
-                  <Calendar size={11} /> {todo.deadline}
-                </span>
-              )}
+              {todo.assignee && <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#2563eb' }}><CircleUser size={11} /> {todo.assignee}</span>}
+              {todo.deadline && <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#9ca3af' }}><Calendar size={11} /> {todo.deadline}</span>}
             </div>
-            {/* Status badge */}
             <div style={{ paddingLeft: 23 }}>
-              <span style={{
-                fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 10,
-                background: todo.status === 'Hoàn thành' ? '#dcfce7' : todo.status === 'Đang làm' ? '#fef9c3' : '#f3f4f6',
-                color:      todo.status === 'Hoàn thành' ? '#16a34a' : todo.status === 'Đang làm' ? '#d97706' : '#9ca3af',
-              }}>
-                {todo.status}
-              </span>
+              <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 10, background: todo.status === 'Hoàn thành' ? '#dcfce7' : todo.status === 'Đang làm' ? '#fef9c3' : '#f3f4f6', color: todo.status === 'Hoàn thành' ? '#16a34a' : todo.status === 'Đang làm' ? '#d97706' : '#9ca3af' }}>{todo.status}</span>
             </div>
           </div>
         ))}
@@ -531,23 +495,38 @@ function DetailPanel({ project }) {
 }
 
 /* ── styles ── */
-const card    = { background: '#fff', borderRadius: 10, border: '1px solid #e5e7eb', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }
+const card          = { background: '#fff', borderRadius: 10, border: '1px solid #e5e7eb', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }
 const sectionHeader = { display: 'flex', alignItems: 'center', justifyContent: 'space-between' }
-const badge   = (bg, color) => ({ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: bg, color })
-const lbl     = { display: 'block', fontSize: 12, fontWeight: 500, color: '#6b7280', marginBottom: 4 }
-const inp     = { width: '100%', padding: '7px 10px', fontSize: 13, border: '1px solid #e5e7eb', borderRadius: 6, outline: 'none', background: '#fff', color: '#111827', boxSizing: 'border-box' }
-const inpSm   = { width: '100%', padding: '5px 8px', fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 6, outline: 'none', background: '#fff', color: '#111827', boxSizing: 'border-box' }
-const grid2   = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }
+const badge         = (bg, color) => ({ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: bg, color })
+const lbl           = { display: 'block', fontSize: 12, fontWeight: 500, color: '#6b7280', marginBottom: 4 }
+const inp           = { width: '100%', padding: '7px 10px', fontSize: 13, border: '1px solid #e5e7eb', borderRadius: 6, outline: 'none', background: '#fff', color: '#111827', boxSizing: 'border-box' }
+const inpSm         = { width: '100%', padding: '5px 8px', fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 6, outline: 'none', background: '#fff', color: '#111827', boxSizing: 'border-box' }
+const grid2         = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }
 
 /* ── MAIN ── */
-export default function SubmitPage({ onSwitch, onLogout }) {
+export default function SubmitPage({ onSwitch, onLogout, user }) {
   const [projects,   setProjects]   = useState([])
   const [selected,   setSelected]   = useState(null)
   const [active,     setActive]     = useState('du-an')
   const [showCreate, setShowCreate] = useState(false)
 
+  const isAdmin = user?.role === 'admin'
+
   async function load() {
-    try { setProjects(await getProjects()) } catch (e) { console.error(e) }
+    try {
+      const all = await getProjects()
+      if (isAdmin) {
+        // Admin thấy tất cả dự án
+        setProjects(all)
+      } else {
+        // Staff chỉ thấy dự án được phân công theo tên
+        const name = user?.full_name || ''
+        const filtered = name
+          ? all.filter(p => p.assignee?.toLowerCase().includes(name.toLowerCase()))
+          : []
+        setProjects(filtered)
+      }
+    } catch (e) { console.error(e) }
   }
 
   useEffect(() => { load() }, [])
@@ -559,14 +538,17 @@ export default function SubmitPage({ onSwitch, onLogout }) {
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Sidebar active={active} setActive={setActive} onSwitch={onSwitch} onLogout={onLogout} />
-      <ListPanel projects={projects} selected={selected} onSelect={setSelected} onAdd={() => setShowCreate(true)} />
+      <Sidebar active={active} setActive={setActive} onSwitch={onSwitch} onLogout={onLogout} user={user} />
+      <ListPanel
+        projects={projects}
+        selected={selected}
+        onSelect={setSelected}
+        onAdd={() => setShowCreate(true)}
+        isAdmin={isAdmin}
+      />
       <DetailPanel project={selected} />
       <TodoPanel project={selected} />
-
-      {showCreate && (
-        <CreateProjectModal onClose={() => setShowCreate(false)} onSaved={handleSaved} />
-      )}
+      {showCreate && <CreateProjectModal onClose={() => setShowCreate(false)} onSaved={handleSaved} />}
     </div>
   )
 }

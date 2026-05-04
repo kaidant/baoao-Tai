@@ -4,12 +4,14 @@ import {
   LogOut, Search, CircleUser, Calendar, FileText,
   Image, Video, ChevronLeft, ChevronRight, X, Loader2, Maximize2,
   Upload, Trash2, CheckCircle2, AlertCircle, Pencil,
-  CheckSquare, Square, Clock, Plus,
+  CheckSquare, Square, Clock, Plus, MessageSquare, Paperclip,
 } from 'lucide-react'
 import {
   getProjects, getReport, uploadFiles, deleteFile,
   saveNotes, submitReport,
   getTodos, createTodo, updateTodoStatus, deleteTodo,
+  getComments, createComment, deleteComment,
+  uploadCommentFiles, deleteCommentFile,
 } from '../api'
 import { supabase } from '../supabase'
 
@@ -23,6 +25,17 @@ function isOverdue(deadline, status) {
   if (!deadline || status === 'Hoàn thành') return false
   const [d, m, y] = deadline.split('/').map(Number)
   return new Date(y, m - 1, d) < new Date()
+}
+
+function timeAgo(dateStr) {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const m = Math.floor(diff / 60000)
+  if (m < 1)  return 'Vừa xong'
+  if (m < 60) return `${m} phút trước`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h} giờ trước`
+  const d = Math.floor(h / 24)
+  return `${d} ngày trước`
 }
 
 /* ── SIDEBAR ── */
@@ -145,20 +158,17 @@ function TodoPanel({ project }) {
     </div>
   )
 
-  const filtered   = todos.filter(t => filterTab === 'Tất cả' || t.status === filterTab)
-  const countDone  = todos.filter(t => t.status === 'Hoàn thành').length
+  const filtered  = todos.filter(t => filterTab === 'Tất cả' || t.status === filterTab)
+  const countDone = todos.filter(t => t.status === 'Hoàn thành').length
 
   async function handleAdd() {
     if (!newContent.trim()) return
     setSaving(true)
     try {
       const todo = await createTodo(project.id, {
-        content:      newContent.trim(),
-        assignee:     newAssignee.trim() || null,
-        deadline:     newDeadline || null,
-        note:         newNote.trim() || null,
-        status:       'Chưa làm',
-        created_by:   'CEO',
+        content: newContent.trim(), assignee: newAssignee.trim() || null,
+        deadline: newDeadline || null, note: newNote.trim() || null,
+        status: 'Chưa làm', created_by: 'CEO',
         meeting_date: new Date().toISOString().split('T')[0],
       })
       setTodos(prev => [...prev, todo])
@@ -169,9 +179,7 @@ function TodoPanel({ project }) {
   }
 
   async function handleToggle(todo) {
-    const next = todo.status === 'Hoàn thành' ? 'Chưa làm'
-               : todo.status === 'Chưa làm'   ? 'Đang làm'
-               : 'Hoàn thành'
+    const next = todo.status === 'Hoàn thành' ? 'Chưa làm' : todo.status === 'Chưa làm' ? 'Đang làm' : 'Hoàn thành'
     try {
       const updated = await updateTodoStatus(todo.id, next)
       setTodos(prev => prev.map(t => t.id === todo.id ? updated : t))
@@ -180,27 +188,18 @@ function TodoPanel({ project }) {
 
   async function handleDelete(id) {
     if (!confirm('Xóa task này?')) return
-    try {
-      await deleteTodo(id)
-      setTodos(prev => prev.filter(t => t.id !== id))
-    } catch (e) { alert(e.message) }
+    try { await deleteTodo(id); setTodos(prev => prev.filter(t => t.id !== id)) }
+    catch (e) { alert(e.message) }
   }
 
-  function statusIcon(status) {
-    if (status === 'Hoàn thành') return <CheckSquare size={15} color="#16a34a" />
-    if (status === 'Đang làm')   return <Clock size={15} color="#d97706" />
+  function statusIcon(s) {
+    if (s === 'Hoàn thành') return <CheckSquare size={15} color="#16a34a" />
+    if (s === 'Đang làm')   return <Clock size={15} color="#d97706" />
     return <Square size={15} color="#9ca3af" />
-  }
-
-  function statusBg(status) {
-    if (status === 'Hoàn thành') return '#f0fdf4'
-    if (status === 'Đang làm')   return '#fffbeb'
-    return '#fff'
   }
 
   return (
     <div style={{ width: 280, flexShrink: 0, background: '#f9fafb', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
       <div style={{ padding: '12px 14px 8px', borderBottom: '1px solid #e5e7eb', background: '#fff' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -212,107 +211,199 @@ function TodoPanel({ project }) {
             <Plus size={12} /> Thêm
           </button>
         </div>
-
-        {/* Progress bar */}
         <div style={{ height: 4, background: '#e5e7eb', borderRadius: 2, overflow: 'hidden' }}>
           <div style={{ height: '100%', width: `${todos.length ? (countDone / todos.length) * 100 : 0}%`, background: '#16a34a', borderRadius: 2, transition: 'width 0.3s' }} />
         </div>
-
-        {/* Filter tabs */}
         <div style={{ display: 'flex', gap: 3, marginTop: 8 }}>
           {['Tất cả', 'Chưa làm', 'Đang làm', 'Hoàn thành'].map(t => (
-            <button key={t} onClick={() => setFilterTab(t)} style={{ padding: '2px 7px', fontSize: 11, fontWeight: filterTab === t ? 600 : 400, background: filterTab === t ? '#2563eb' : 'transparent', color: filterTab === t ? '#fff' : '#6b7280', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
-              {t}
-            </button>
+            <button key={t} onClick={() => setFilterTab(t)} style={{ padding: '2px 7px', fontSize: 11, fontWeight: filterTab === t ? 600 : 400, background: filterTab === t ? '#2563eb' : 'transparent', color: filterTab === t ? '#fff' : '#6b7280', border: 'none', borderRadius: 4, cursor: 'pointer' }}>{t}</button>
           ))}
         </div>
       </div>
 
-      {/* Add form — CEO có thêm trường note */}
       {showAdd && (
         <div style={{ padding: '10px 14px', borderBottom: '1px solid #e5e7eb', background: '#fff', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <textarea value={newContent} onChange={e => setNewContent(e.target.value)}
-            placeholder="Nội dung vấn đề / task..." rows={2}
+          <textarea value={newContent} onChange={e => setNewContent(e.target.value)} placeholder="Nội dung vấn đề / task..." rows={2}
             style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 6, resize: 'none', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }} />
-          <input value={newAssignee} onChange={e => setNewAssignee(e.target.value)}
-            placeholder="Giao cho (KS PO, KS thành viên...)"
-            style={inpSm} />
+          <input value={newAssignee} onChange={e => setNewAssignee(e.target.value)} placeholder="Giao cho..." style={inpSm} />
           <input type="date" value={newDeadline} onChange={e => setNewDeadline(e.target.value)} style={inpSm} />
-          <textarea value={newNote} onChange={e => setNewNote(e.target.value)}
-            placeholder="Ghi chú thêm của CEO..." rows={2}
+          <textarea value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Ghi chú thêm..." rows={2}
             style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 6, resize: 'none', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', background: '#fffbeb' }} />
           <div style={{ display: 'flex', gap: 6 }}>
-            <button onClick={handleAdd} disabled={saving || !newContent.trim()}
-              style={{ flex: 1, padding: '6px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 700, cursor: saving || !newContent.trim() ? 'not-allowed' : 'pointer', opacity: saving || !newContent.trim() ? 0.6 : 1 }}>
+            <button onClick={handleAdd} disabled={saving || !newContent.trim()} style={{ flex: 1, padding: '6px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 700, cursor: saving || !newContent.trim() ? 'not-allowed' : 'pointer', opacity: saving || !newContent.trim() ? 0.6 : 1 }}>
               {saving ? 'Đang lưu...' : 'Lưu'}
             </button>
             <button onClick={() => { setShowAdd(false); setNewContent(''); setNewAssignee(''); setNewDeadline(''); setNewNote('') }}
-              style={{ padding: '6px 12px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 5, fontSize: 12, cursor: 'pointer' }}>
-              Hủy
-            </button>
+              style={{ padding: '6px 12px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 5, fontSize: 12, cursor: 'pointer' }}>Hủy</button>
           </div>
         </div>
       )}
 
-      {/* Todo list */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
         {loading && <div style={{ textAlign: 'center', padding: 20 }}><Loader2 size={16} style={{ color: '#2563eb' }} /></div>}
-        {!loading && filtered.length === 0 && (
-          <div style={{ textAlign: 'center', color: '#9ca3af', fontSize: 12, padding: 24 }}>
-            {filterTab === 'Tất cả' ? 'Chưa có task nào' : `Không có task "${filterTab}"`}
-          </div>
-        )}
+        {!loading && filtered.length === 0 && <div style={{ textAlign: 'center', color: '#9ca3af', fontSize: 12, padding: 24 }}>Chưa có task nào</div>}
         {filtered.map(todo => (
-          <div key={todo.id} style={{ background: statusBg(todo.status), borderRadius: 8, padding: '8px 10px', border: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div key={todo.id} style={{ background: todo.status === 'Hoàn thành' ? '#f0fdf4' : todo.status === 'Đang làm' ? '#fffbeb' : '#fff', borderRadius: 8, padding: '8px 10px', border: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-              <button onClick={() => handleToggle(todo)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, marginTop: 1 }}>
-                {statusIcon(todo.status)}
-              </button>
-              <span style={{ flex: 1, fontSize: 12, color: '#111827', lineHeight: 1.4, textDecoration: todo.status === 'Hoàn thành' ? 'line-through' : 'none', opacity: todo.status === 'Hoàn thành' ? 0.6 : 1 }}>
-                {todo.content}
-              </span>
-              <button onClick={() => handleDelete(todo.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', padding: 0, flexShrink: 0 }}>
-                <X size={12} />
-              </button>
+              <button onClick={() => handleToggle(todo)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, marginTop: 1 }}>{statusIcon(todo.status)}</button>
+              <span style={{ flex: 1, fontSize: 12, color: '#111827', lineHeight: 1.4, textDecoration: todo.status === 'Hoàn thành' ? 'line-through' : 'none', opacity: todo.status === 'Hoàn thành' ? 0.6 : 1 }}>{todo.content}</span>
+              <button onClick={() => handleDelete(todo.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', padding: 0, flexShrink: 0 }}><X size={12} /></button>
             </div>
-
             <div style={{ display: 'flex', gap: 8, paddingLeft: 23, flexWrap: 'wrap' }}>
-              {todo.assignee && (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#2563eb' }}>
-                  <CircleUser size={11} /> {todo.assignee}
-                </span>
-              )}
-              {todo.deadline && (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#9ca3af' }}>
-                  <Calendar size={11} /> {todo.deadline}
-                </span>
-              )}
-              {todo.created_by && (
-                <span style={{ fontSize: 10, color: '#9ca3af', fontStyle: 'italic' }}>
-                  bởi {todo.created_by}
-                </span>
-              )}
+              {todo.assignee && <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#2563eb' }}><CircleUser size={11} /> {todo.assignee}</span>}
+              {todo.deadline && <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#9ca3af' }}><Calendar size={11} /> {todo.deadline}</span>}
+              {todo.created_by && <span style={{ fontSize: 10, color: '#9ca3af', fontStyle: 'italic' }}>bởi {todo.created_by}</span>}
             </div>
-
-            {/* Note của CEO */}
-            {todo.note && (
-              <div style={{ paddingLeft: 23, fontSize: 11, color: '#d97706', background: '#fffbeb', borderRadius: 4, padding: '3px 6px 3px 23px', marginTop: 2 }}>
-                📝 {todo.note}
-              </div>
-            )}
-
+            {todo.note && <div style={{ paddingLeft: 23, fontSize: 11, color: '#d97706', background: '#fffbeb', borderRadius: 4, padding: '3px 6px 3px 23px', marginTop: 2 }}>📝 {todo.note}</div>}
             <div style={{ paddingLeft: 23 }}>
-              <span style={{
-                fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 10,
-                background: todo.status === 'Hoàn thành' ? '#dcfce7' : todo.status === 'Đang làm' ? '#fef9c3' : '#f3f4f6',
-                color:      todo.status === 'Hoàn thành' ? '#16a34a' : todo.status === 'Đang làm' ? '#d97706' : '#9ca3af',
-              }}>
-                {todo.status}
-              </span>
+              <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 10, background: todo.status === 'Hoàn thành' ? '#dcfce7' : todo.status === 'Đang làm' ? '#fef9c3' : '#f3f4f6', color: todo.status === 'Hoàn thành' ? '#16a34a' : todo.status === 'Đang làm' ? '#d97706' : '#9ca3af' }}>{todo.status}</span>
             </div>
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+/* ── COMMENTS SECTION ── */
+function CommentsSection({ project }) {
+  const [comments,    setComments]    = useState([])
+  const [loading,     setLoading]     = useState(false)
+  const [content,     setContent]     = useState('')
+  const [authorName,  setAuthorName]  = useState('Tai Huynh')
+  const [files,       setFiles]       = useState([])
+  const [saving,      setSaving]      = useState(false)
+  const [uploading,   setUploading]   = useState(false)
+  const fileRef = useRef()
+
+  useEffect(() => {
+    if (!project) return
+    setLoading(true)
+    getComments(project.id).then(setComments).catch(console.error).finally(() => setLoading(false))
+  }, [project?.id])
+
+  async function handleSubmit() {
+    if (!content.trim()) return
+    setSaving(true)
+    try {
+      const comment = await createComment(project.id, content.trim(), authorName)
+      if (files.length > 0) {
+        setUploading(true)
+        await uploadCommentFiles(comment.id, files)
+        setUploading(false)
+      }
+      const updated = await getComments(project.id)
+      setComments(updated)
+      setContent(''); setFiles([])
+    } catch (e) { alert(e.message) }
+    finally { setSaving(false); setUploading(false) }
+  }
+
+  async function handleDeleteComment(id) {
+    if (!confirm('Xóa note này?')) return
+    try { await deleteComment(id); setComments(prev => prev.filter(c => c.id !== id)) }
+    catch (e) { alert(e.message) }
+  }
+
+  async function handleDeleteFile(fileId, filename) {
+    try {
+      await deleteCommentFile(fileId, filename)
+      setComments(prev => prev.map(c => ({ ...c, comment_files: c.comment_files?.filter(f => f.id !== fileId) })))
+    } catch (e) { alert(e.message) }
+  }
+
+  function getFileUrl(f) {
+    const { data } = supabase.storage.from('comment-files').getPublicUrl(f.filename)
+    return data.publicUrl
+  }
+
+  return (
+    <div style={card}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <MessageSquare size={15} color="#d97706" />
+        <span style={{ fontWeight: 700, fontSize: 13, color: '#111827' }}>Note của CEO</span>
+        <span style={{ fontSize: 11, background: '#fef9c3', color: '#d97706', padding: '1px 7px', borderRadius: 10, fontWeight: 600 }}>{comments.length}</span>
+      </div>
+
+      {/* Form thêm note */}
+      <div style={{ background: '#fffbeb', borderRadius: 8, padding: '12px', border: '1px solid #fde68a', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <input value={authorName} onChange={e => setAuthorName(e.target.value)}
+          placeholder="Tên người note..." style={{ ...inpSm, background: '#fff' }} />
+        <textarea value={content} onChange={e => setContent(e.target.value)}
+          placeholder="Ghi chú vấn đề, ý kiến, phản hồi..." rows={3}
+          style={{ width: '100%', padding: '8px 10px', fontSize: 13, border: '1px solid #fde68a', borderRadius: 6, resize: 'none', outline: 'none', fontFamily: 'inherit', background: '#fff', boxSizing: 'border-box' }} />
+
+        {/* File đính kèm */}
+        {files.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {files.map((f, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 5, padding: '3px 8px', fontSize: 11 }}>
+                <Paperclip size={11} color="#9ca3af" />
+                <span style={{ maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#374151' }}>{f.name}</span>
+                <button onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', padding: 0 }}><X size={10} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button onClick={() => fileRef.current?.click()} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: 5, fontSize: 12, cursor: 'pointer' }}>
+            <Paperclip size={12} /> Đính kèm
+          </button>
+          <input ref={fileRef} type="file" multiple style={{ display: 'none' }} onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files)])} />
+          <button onClick={handleSubmit} disabled={saving || uploading || !content.trim()}
+            style={{ flex: 1, padding: '6px', background: '#d97706', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 700, cursor: saving || !content.trim() ? 'not-allowed' : 'pointer', opacity: saving || !content.trim() ? 0.6 : 1 }}>
+            {saving ? (uploading ? 'Đang upload...' : 'Đang lưu...') : '📝 Ghi note'}
+          </button>
+        </div>
+      </div>
+
+      {/* Danh sách comments */}
+      {loading && <div style={{ textAlign: 'center', padding: 16 }}><Loader2 size={16} style={{ color: '#d97706' }} /></div>}
+      {!loading && comments.length === 0 && (
+        <div style={{ textAlign: 'center', color: '#9ca3af', fontSize: 12, padding: '12px 0' }}>Chưa có note nào</div>
+      )}
+      {comments.map(c => (
+        <div key={c.id} style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {/* Header comment */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 12, fontWeight: 700 }}>
+                {(c.author_name || 'CEO')[0].toUpperCase()}
+              </div>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>{c.author_name || 'CEO'}</div>
+                <div style={{ fontSize: 10, color: '#9ca3af' }}>{timeAgo(c.created_at)}</div>
+              </div>
+            </div>
+            <button onClick={() => handleDeleteComment(c.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db' }}><X size={13} /></button>
+          </div>
+
+          {/* Nội dung */}
+          <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.5, margin: 0 }}>{c.content}</p>
+
+          {/* Files đính kèm */}
+          {c.comment_files?.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {c.comment_files.map(f => (
+                f.file_type === 'image' ? (
+                  <div key={f.id} style={{ position: 'relative', width: 64, height: 64, borderRadius: 6, overflow: 'hidden', border: '1px solid #e5e7eb' }}>
+                    <img src={getFileUrl(f)} alt={f.original_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <button onClick={() => handleDeleteFile(f.id, f.filename)} style={{ position: 'absolute', top: 2, right: 2, width: 16, height: 16, background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: '50%', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={9} /></button>
+                  </div>
+                ) : (
+                  <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 5, padding: '4px 8px', fontSize: 11 }}>
+                    <Paperclip size={11} color="#9ca3af" />
+                    <a href={getFileUrl(f)} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.original_name}</a>
+                    <button onClick={() => handleDeleteFile(f.id, f.filename)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', padding: 0 }}><X size={10} /></button>
+                  </div>
+                )
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   )
 }
@@ -463,6 +554,8 @@ function DetailPanel({ project }) {
   return (
     <div style={{ flex: 1, background: '#f3f4f6', overflowY: 'auto' }}>
       <div style={{ maxWidth: 580, margin: '0 auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+        {/* Project info */}
         <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
             <div>
@@ -517,8 +610,7 @@ function DetailPanel({ project }) {
 
                 <div style={card}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    <Video size={15} color="#7c3aed" />
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>Upload video</span>
+                    <Video size={15} color="#7c3aed" /><span style={{ fontWeight: 600, fontSize: 13 }}>Upload video</span>
                   </div>
                   <div {...dropZone('vid', vidRef)}>
                     <Upload size={18} style={{ margin: '0 auto', color: '#d1d5db' }} />
@@ -536,8 +628,7 @@ function DetailPanel({ project }) {
 
                 <div style={card}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    <FileText size={15} color="#6b7280" />
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>Ghi chú báo cáo</span>
+                    <FileText size={15} color="#6b7280" /><span style={{ fontWeight: 600, fontSize: 13 }}>Ghi chú báo cáo</span>
                   </div>
                   <textarea value={notes} onChange={e => setNotes(e.target.value)} onBlur={handleSaveNotes}
                     placeholder="Nhập mô tả, kết quả, vấn đề..." rows={3}
@@ -617,6 +708,9 @@ function DetailPanel({ project }) {
                 )}
               </>
             )}
+
+            {/* ── COMMENTS SECTION — luôn hiển thị bên dưới ── */}
+            <CommentsSection project={project} />
           </>
         )}
       </div>

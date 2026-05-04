@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { supabase } from '../supabase'
+import { login } from '../api'
 
 export default function LoginPage({ onLogin }) {
   const [email,    setEmail]    = useState('')
@@ -11,22 +11,9 @@ export default function LoginPage({ onLogin }) {
     e.preventDefault()
     if (!email.trim() || !password) { setError('Vui lòng nhập đầy đủ thông tin'); return }
     setLoading(true); setError('')
-
     try {
-      const { data, error: authError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      })
-      if (authError) throw new Error('Email hoặc mật khẩu không đúng')
-
-      // Lấy profile (role) từ bảng profiles
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', data.user.id)
-        .single()
-
-      onLogin({ ...data.user, role: profile?.role || 'staff', full_name: profile?.full_name })
+      const data = await login(email.trim(), password)
+      onLogin(data.user)
     } catch (err) {
       setError(err.message)
     } finally {

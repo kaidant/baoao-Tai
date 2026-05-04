@@ -295,3 +295,80 @@ export async function updateTodoStatus(id, status) {
   if (error) throw new Error('Cập nhật trạng thái thất bại')
   return data
 }
+
+// ── Comments (Note của CEO) ───────────────────────────────────
+
+export async function getComments(projectId) {
+  const { data, error } = await supabase
+    .from('comments')
+    .select('*, comment_files(*)')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: false })
+  if (error) throw new Error('Không tải được comments')
+  return data || []
+}
+
+export async function createComment(projectId, content, authorName) {
+  const { data: { user } } = await supabase.auth.getUser()
+  const { data, error } = await supabase
+    .from('comments')
+    .insert([{
+      project_id:  projectId,
+      user_id:     user?.id || null,
+      author_name: authorName,
+      content,
+    }])
+    .select()
+    .single()
+  if (error) throw new Error('Tạo note thất bại')
+  return data
+}
+
+export async function deleteComment(commentId) {
+  const { error } = await supabase
+    .from('comments')
+    .delete()
+    .eq('id', commentId)
+  if (error) throw new Error('Xóa note thất bại')
+}
+
+export async function uploadCommentFiles(commentId, fileList) {
+  const results = []
+  for (const file of fileList) {
+    const ext      = file.name.split('.').pop()
+    const filename = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
+    const isImage  = file.type.startsWith('image/')
+    const bucket   = 'comment-files'
+
+    const { error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(filename, file)
+
+    if (uploadError) throw new Error(`Upload thất bại: ${uploadError.message}`)
+
+    const { data } = await supabase
+      .from('comment_files')
+      .insert([{
+        comment_id:    commentId,
+        filename,
+        original_name: file.name,
+        file_type:     isImage ? 'image' : 'file',
+        size:          file.size,
+        bucket,
+      }])
+      .select()
+      .single()
+
+    results.push(data)
+  }
+  return results
+}
+
+export async function deleteCommentFile(fileId, filename) {
+  await supabase.storage.from('comment-files').remove([filename])
+  const { error } = await supabase
+    .from('comment_files')
+    .delete()
+    .eq('id', fileId)
+  if (error) throw new Error('Xóa file thất bại')
+}
