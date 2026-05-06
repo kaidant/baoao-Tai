@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import {
-  FolderKanban, UserSquare2, ClipboardList,
+  FolderKanban, UserSquare2, ClipboardList, History,
   LogOut, Search, CircleUser, Calendar, FileText,
   Image, Video, ChevronLeft, ChevronRight, X, Loader2, Maximize2,
   Upload, Trash2, CheckCircle2, AlertCircle, Pencil,
-  CheckSquare, Square, Clock, Plus, MessageSquare, Paperclip,
+  CheckSquare, Square, Clock, Plus, MessageSquare, Paperclip, Flag,
 } from 'lucide-react'
 import {
   getProjects, getReport, uploadFiles, deleteFile,
@@ -12,14 +12,18 @@ import {
   getTodos, createTodo, updateTodoStatus, deleteTodo,
   getComments, createComment, deleteComment,
   uploadCommentFiles, deleteCommentFile,
+  getMilestones, createMilestone, deleteMilestone, updateMilestoneStatus,
 } from '../api'
 import { supabase } from '../supabase'
 
 const NAV = [
-  { id: 'du-an',      label: 'Dự án',   icon: FolderKanban },
-  { id: 'nhan-su',    label: 'Nhân sự', icon: UserSquare2 },
-  { id: 'nghiem-thu', label: 'Báo cáo', icon: ClipboardList },
+  { id: 'du-an',      label: 'Dự án',        icon: FolderKanban },
+  { id: 'nhan-su',    label: 'Nhân sự',       icon: UserSquare2 },
+  { id: 'nghiem-thu', label: 'Báo cáo',       icon: ClipboardList },
+  { id: 'lich-su',    label: 'Lịch sử họp',   icon: History },
 ]
+
+const MILESTONE_STATUSES = ['Chưa bắt đầu', 'Đang thực hiện', 'Hoàn thành', 'Tạm dừng']
 
 function isOverdue(deadline, status) {
   if (!deadline || status === 'Hoàn thành') return false
@@ -38,13 +42,27 @@ function timeAgo(dateStr) {
   return `${d} ngày trước`
 }
 
+function msColor(status) {
+  if (status === 'Hoàn thành')     return { bg: '#dcfce7', color: '#16a34a', border: '#bbf7d0' }
+  if (status === 'Đang thực hiện') return { bg: '#eff6ff', color: '#2563eb', border: '#bfdbfe' }
+  if (status === 'Tạm dừng')       return { bg: '#fef9c3', color: '#d97706', border: '#fde68a' }
+  return { bg: '#f3f4f6', color: '#6b7280', border: '#e5e7eb' }
+}
+
 /* ── SIDEBAR ── */
-function Sidebar({ onSwitch, onLogout }) {
+function Sidebar({ onSwitch, onLogout, user }) {
   return (
     <aside style={{ width: 158, background: '#1e3a5f', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '14px 16px 12px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
         <div style={{ fontWeight: 700, color: '#fff', fontSize: 14 }}>BaoCao</div>
-        <div style={{ color: '#7aa3c8', fontSize: 11, marginTop: 2 }}>admin@baocao.vn</div>
+        <div style={{ color: '#7aa3c8', fontSize: 11, marginTop: 2 }}>{user?.email || 'admin@baocao.vn'}</div>
+        {user?.role && (
+          <div style={{ marginTop: 4 }}>
+            <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 10, background: user.role === 'admin' ? '#2563eb' : '#16a34a', color: '#fff' }}>
+              {user.role === 'admin' ? '⚡ Admin' : '👤 Kỹ sư'}
+            </span>
+          </div>
+        )}
       </div>
       <nav style={{ flex: 1, paddingTop: 6 }}>
         {NAV.map(({ id, label, icon: Icon }) => {
@@ -54,6 +72,7 @@ function Sidebar({ onSwitch, onLogout }) {
               onClick={() => {
                 if (id === 'du-an'   && typeof onSwitch === 'function') onSwitch('submit')
                 if (id === 'nhan-su' && typeof onSwitch === 'function') onSwitch('staff')
+                if (id === 'lich-su' && typeof onSwitch === 'function') onSwitch('meeting')
               }}
               style={{
                 width: '100%', display: 'flex', alignItems: 'center', gap: 10,
@@ -130,6 +149,125 @@ function ListPanel({ projects, selected, onSelect }) {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+/* ── MILESTONES SECTION ── */
+function MilestonesSection({ project }) {
+  const [milestones, setMilestones] = useState([])
+  const [loading,    setLoading]    = useState(false)
+  const [showAdd,    setShowAdd]    = useState(false)
+  const [saving,     setSaving]     = useState(false)
+  const [form, setForm] = useState({ title: '', description: '', due_date: '', status: 'Chưa bắt đầu' })
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  useEffect(() => {
+    if (!project) return
+    setLoading(true)
+    getMilestones(project.id).then(setMilestones).catch(console.error).finally(() => setLoading(false))
+  }, [project?.id])
+
+  const countDone = milestones.filter(m => m.status === 'Hoàn thành').length
+
+  async function handleAdd() {
+    if (!form.title.trim()) return
+    setSaving(true)
+    try {
+      const ms = await createMilestone(project.id, { ...form, order_index: milestones.length })
+      setMilestones(prev => [...prev, ms])
+      setForm({ title: '', description: '', due_date: '', status: 'Chưa bắt đầu' })
+      setShowAdd(false)
+    } catch (e) { alert(e.message) }
+    finally { setSaving(false) }
+  }
+
+  async function handleStatusChange(id, status) {
+    try {
+      const updated = await updateMilestoneStatus(id, status)
+      setMilestones(prev => prev.map(m => m.id === id ? updated : m))
+    } catch (e) { alert(e.message) }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm('Xóa milestone này?')) return
+    try { await deleteMilestone(id); setMilestones(prev => prev.filter(m => m.id !== id)) }
+    catch (e) { alert(e.message) }
+  }
+
+  return (
+    <div style={card}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Flag size={15} color="#7c3aed" />
+          <span style={{ fontWeight: 700, fontSize: 13, color: '#111827' }}>Milestones</span>
+          <span style={{ fontSize: 11, background: '#f5f3ff', color: '#7c3aed', padding: '1px 7px', borderRadius: 10, fontWeight: 600 }}>
+            {countDone}/{milestones.length}
+          </span>
+        </div>
+        <button onClick={() => setShowAdd(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+          <Plus size={12} /> Thêm
+        </button>
+      </div>
+
+      {milestones.length > 0 && (
+        <div style={{ height: 6, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${(countDone / milestones.length) * 100}%`, background: '#7c3aed', borderRadius: 3, transition: 'width 0.3s' }} />
+        </div>
+      )}
+
+      {showAdd && (
+        <div style={{ background: '#f5f3ff', borderRadius: 8, padding: '12px', border: '1px solid #ddd6fe', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <input value={form.title} onChange={e => set('title', e.target.value)}
+            placeholder="Tên milestone... (VD: Chốt thiết kế, Mẫu lần 1)" style={inpSm} />
+          <textarea value={form.description} onChange={e => set('description', e.target.value)}
+            placeholder="Mô tả chi tiết..." rows={2}
+            style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 6, resize: 'none', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <input type="date" value={form.due_date} onChange={e => set('due_date', e.target.value)} style={inpSm} />
+            <select value={form.status} onChange={e => set('status', e.target.value)} style={inpSm}>
+              {MILESTONE_STATUSES.map(s => <option key={s}>{s}</option>)}
+            </select>
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={handleAdd} disabled={saving || !form.title.trim()}
+              style={{ flex: 1, padding: '6px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 700, cursor: saving || !form.title.trim() ? 'not-allowed' : 'pointer', opacity: saving || !form.title.trim() ? 0.6 : 1 }}>
+              {saving ? 'Đang lưu...' : 'Lưu'}
+            </button>
+            <button onClick={() => setShowAdd(false)} style={{ padding: '6px 12px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 5, fontSize: 12, cursor: 'pointer' }}>Hủy</button>
+          </div>
+        </div>
+      )}
+
+      {loading && <div style={{ textAlign: 'center', padding: 16 }}><Loader2 size={16} style={{ color: '#7c3aed' }} /></div>}
+      {!loading && milestones.length === 0 && <div style={{ textAlign: 'center', color: '#9ca3af', fontSize: 12, padding: '12px 0' }}>Chưa có milestone nào</div>}
+      {milestones.map((ms, idx) => {
+        const c = msColor(ms.status)
+        return (
+          <div key={ms.id} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: c.bg, border: `2px solid ${c.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: c.color }}>
+                {idx + 1}
+              </div>
+              {idx < milestones.length - 1 && <div style={{ width: 2, height: 20, background: '#e5e7eb', marginTop: 2 }} />}
+            </div>
+            <div style={{ flex: 1, background: c.bg, borderRadius: 8, padding: '8px 10px', border: `1px solid ${c.border}`, marginBottom: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                <span style={{ fontWeight: 600, fontSize: 13, color: '#111827' }}>{ms.title}</span>
+                <button onClick={() => handleDelete(ms.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', padding: 0, flexShrink: 0 }}><X size={12} /></button>
+              </div>
+              {ms.description && <p style={{ fontSize: 12, color: '#6b7280', margin: '3px 0 0', lineHeight: 1.4 }}>{ms.description}</p>}
+              <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                {ms.due_date && <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#9ca3af' }}><Calendar size={11} /> {ms.due_date}</span>}
+                <select value={ms.status} onChange={e => handleStatusChange(ms.id, e.target.value)}
+                  style={{ fontSize: 11, fontWeight: 600, padding: '1px 6px', borderRadius: 10, border: `1px solid ${c.border}`, background: c.bg, color: c.color, cursor: 'pointer', outline: 'none' }}>
+                  {MILESTONE_STATUSES.map(s => <option key={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -254,7 +392,7 @@ function TodoPanel({ project }) {
               {todo.deadline && <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#9ca3af' }}><Calendar size={11} /> {todo.deadline}</span>}
               {todo.created_by && <span style={{ fontSize: 10, color: '#9ca3af', fontStyle: 'italic' }}>bởi {todo.created_by}</span>}
             </div>
-            {todo.note && <div style={{ paddingLeft: 23, fontSize: 11, color: '#d97706', background: '#fffbeb', borderRadius: 4, padding: '3px 6px 3px 23px', marginTop: 2 }}>📝 {todo.note}</div>}
+            {todo.note && <div style={{ fontSize: 11, color: '#d97706', background: '#fffbeb', borderRadius: 4, padding: '3px 6px 3px 23px', marginTop: 2 }}>📝 {todo.note}</div>}
             <div style={{ paddingLeft: 23 }}>
               <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 10, background: todo.status === 'Hoàn thành' ? '#dcfce7' : todo.status === 'Đang làm' ? '#fef9c3' : '#f3f4f6', color: todo.status === 'Hoàn thành' ? '#16a34a' : todo.status === 'Đang làm' ? '#d97706' : '#9ca3af' }}>{todo.status}</span>
             </div>
@@ -267,13 +405,13 @@ function TodoPanel({ project }) {
 
 /* ── COMMENTS SECTION ── */
 function CommentsSection({ project }) {
-  const [comments,    setComments]    = useState([])
-  const [loading,     setLoading]     = useState(false)
-  const [content,     setContent]     = useState('')
-  const [authorName,  setAuthorName]  = useState('Tai Huynh')
-  const [files,       setFiles]       = useState([])
-  const [saving,      setSaving]      = useState(false)
-  const [uploading,   setUploading]   = useState(false)
+  const [comments,  setComments]  = useState([])
+  const [loading,   setLoading]   = useState(false)
+  const [content,   setContent]   = useState('')
+  const [authorName,setAuthorName]= useState('Tai Huynh')
+  const [files,     setFiles]     = useState([])
+  const [saving,    setSaving]    = useState(false)
+  const [uploading, setUploading] = useState(false)
   const fileRef = useRef()
 
   useEffect(() => {
@@ -287,13 +425,8 @@ function CommentsSection({ project }) {
     setSaving(true)
     try {
       const comment = await createComment(project.id, content.trim(), authorName)
-      if (files.length > 0) {
-        setUploading(true)
-        await uploadCommentFiles(comment.id, files)
-        setUploading(false)
-      }
-      const updated = await getComments(project.id)
-      setComments(updated)
+      if (files.length > 0) { setUploading(true); await uploadCommentFiles(comment.id, files); setUploading(false) }
+      setComments(await getComments(project.id))
       setContent(''); setFiles([])
     } catch (e) { alert(e.message) }
     finally { setSaving(false); setUploading(false) }
@@ -319,22 +452,15 @@ function CommentsSection({ project }) {
 
   return (
     <div style={card}>
-      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <MessageSquare size={15} color="#d97706" />
         <span style={{ fontWeight: 700, fontSize: 13, color: '#111827' }}>Note của CEO</span>
         <span style={{ fontSize: 11, background: '#fef9c3', color: '#d97706', padding: '1px 7px', borderRadius: 10, fontWeight: 600 }}>{comments.length}</span>
       </div>
-
-      {/* Form thêm note */}
       <div style={{ background: '#fffbeb', borderRadius: 8, padding: '12px', border: '1px solid #fde68a', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <input value={authorName} onChange={e => setAuthorName(e.target.value)}
-          placeholder="Tên người note..." style={{ ...inpSm, background: '#fff' }} />
-        <textarea value={content} onChange={e => setContent(e.target.value)}
-          placeholder="Ghi chú vấn đề, ý kiến, phản hồi..." rows={3}
+        <input value={authorName} onChange={e => setAuthorName(e.target.value)} placeholder="Tên người note..." style={{ ...inpSm, background: '#fff' }} />
+        <textarea value={content} onChange={e => setContent(e.target.value)} placeholder="Ghi chú vấn đề, ý kiến, phản hồi..." rows={3}
           style={{ width: '100%', padding: '8px 10px', fontSize: 13, border: '1px solid #fde68a', borderRadius: 6, resize: 'none', outline: 'none', fontFamily: 'inherit', background: '#fff', boxSizing: 'border-box' }} />
-
-        {/* File đính kèm */}
         {files.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {files.map((f, i) => (
@@ -346,7 +472,6 @@ function CommentsSection({ project }) {
             ))}
           </div>
         )}
-
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button onClick={() => fileRef.current?.click()} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: 5, fontSize: 12, cursor: 'pointer' }}>
             <Paperclip size={12} /> Đính kèm
@@ -358,15 +483,10 @@ function CommentsSection({ project }) {
           </button>
         </div>
       </div>
-
-      {/* Danh sách comments */}
       {loading && <div style={{ textAlign: 'center', padding: 16 }}><Loader2 size={16} style={{ color: '#d97706' }} /></div>}
-      {!loading && comments.length === 0 && (
-        <div style={{ textAlign: 'center', color: '#9ca3af', fontSize: 12, padding: '12px 0' }}>Chưa có note nào</div>
-      )}
+      {!loading && comments.length === 0 && <div style={{ textAlign: 'center', color: '#9ca3af', fontSize: 12, padding: '12px 0' }}>Chưa có note nào</div>}
       {comments.map(c => (
         <div key={c.id} style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {/* Header comment */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 12, fontWeight: 700 }}>
@@ -379,11 +499,7 @@ function CommentsSection({ project }) {
             </div>
             <button onClick={() => handleDeleteComment(c.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db' }}><X size={13} /></button>
           </div>
-
-          {/* Nội dung */}
           <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.5, margin: 0 }}>{c.content}</p>
-
-          {/* Files đính kèm */}
           {c.comment_files?.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {c.comment_files.map(f => (
@@ -709,7 +825,10 @@ function DetailPanel({ project }) {
               </>
             )}
 
-            {/* ── COMMENTS SECTION — luôn hiển thị bên dưới ── */}
+            {/* ── MILESTONES ── */}
+            <MilestonesSection project={project} />
+
+            {/* ── COMMENTS SECTION ── */}
             <CommentsSection project={project} />
           </>
         )}
@@ -722,13 +841,13 @@ const card  = { background: '#fff', borderRadius: 10, border: '1px solid #e5e7eb
 const inpSm = { width: '100%', padding: '5px 8px', fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 6, outline: 'none', background: '#fff', color: '#111827', boxSizing: 'border-box' }
 
 /* ── MAIN ── */
-export default function PresentPage({ onSwitch, onLogout }) {
+export default function PresentPage({ onSwitch, onLogout, user }) {
   const [projects, setProjects] = useState([])
   const [selected, setSelected] = useState(null)
   useEffect(() => { getProjects().then(setProjects).catch(console.error) }, [])
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Sidebar onSwitch={onSwitch} onLogout={onLogout} />
+      <Sidebar onSwitch={onSwitch} onLogout={onLogout} user={user} />
       <ListPanel projects={projects} selected={selected} onSelect={setSelected} />
       <DetailPanel project={selected} />
       <TodoPanel project={selected} />
