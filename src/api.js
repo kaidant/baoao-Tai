@@ -71,30 +71,20 @@ export async function deleteProject(id) {
 // ── Reports ──────────────────────────────────────────────────
 
 export async function getReport(projectId) {
-  // Dùng limit(1) thay vì single() để tránh lỗi 406 khi không có row
   const { data: reports } = await supabase
-    .from('Report')
-    .select('*')
-    .eq('projectId', projectId)
-    .limit(1)
-
+    .from('Report').select('*').eq('projectId', projectId).limit(1)
   let report = reports?.[0] || null
 
   if (!report) {
     const { data: newReport, error } = await supabase
       .from('Report')
       .insert([{ projectId, notes: '', submitted: false }])
-      .select()
-      .single()
+      .select().single()
     if (error) throw new Error('Tạo báo cáo thất bại: ' + error.message)
     report = newReport
   }
 
-  const { data: files } = await supabase
-    .from('File')
-    .select('*')
-    .eq('reportId', report.id)
-
+  const { data: files } = await supabase.from('File').select('*').eq('reportId', report.id)
   return { ...report, files: files || [] }
 }
 
@@ -129,23 +119,36 @@ export async function uploadFiles(projectId, fileList) {
     const filename = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
     const isImage = file.type.startsWith('image/')
     const bucket = isImage ? 'images' : 'videos'
+
     const { error: uploadError } = await supabase.storage.from(bucket).upload(filename, file)
     if (uploadError) throw new Error(`Upload thất bại: ${uploadError.message}`)
-    await supabase.from('File').insert([{
-      reportId: report.id, filename,
+
+    const { error: insertError } = await supabase.from('File').insert([{
+      reportId:     report.id,
+      filename,
       originalName: file.name,
-      type: isImage ? 'image' : 'video',
-      size: file.size, bucket,
+      type:         isImage ? 'image' : 'video',
+      size:         file.size,
+      path:         `${bucket}/${filename}`,
     }])
+    if (insertError) throw new Error(`Lưu file thất bại: ${insertError.message}`)
   }
 }
 
 export async function deleteFile(projectId, fileId) {
   const { data: file } = await supabase.from('File').select('*').eq('id', fileId).single()
   if (!file) throw new Error('Không tìm thấy file')
-  await supabase.storage.from(file.bucket).remove([file.filename])
+  const bucket = file.type === 'image' ? 'images' : 'videos'
+  await supabase.storage.from(bucket).remove([file.filename])
   const { error } = await supabase.from('File').delete().eq('id', fileId)
   if (error) throw new Error('Xóa file thất bại')
+}
+
+// Lấy public URL của file — dùng type thay vì bucket
+export function getFileUrl(file) {
+  const bucket = file.type === 'image' ? 'images' : 'videos'
+  const { data } = supabase.storage.from(bucket).getPublicUrl(file.filename)
+  return data.publicUrl
 }
 
 // ── Staff ────────────────────────────────────────────────────
@@ -295,8 +298,7 @@ export async function deleteMeeting(id) {
 // ── Milestones ────────────────────────────────────────────────
 
 export async function getMilestones(projectId) {
-  const { data, error } = await supabase
-    .from('milestones').select('*').eq('project_id', projectId).order('order_index', { ascending: true })
+  const { data, error } = await supabase.from('milestones').select('*').eq('project_id', projectId).order('order_index', { ascending: true })
   if (error) throw new Error('Không tải được milestones')
   return data || []
 }
