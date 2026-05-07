@@ -390,9 +390,10 @@ function DetailPanel({ project }) {
   }
 
   function getImageUrl(f) {
-    const { data } = supabase.storage.from(f.bucket || 'images').getPublicUrl(f.filename)
-    return data.publicUrl
-  }
+  const bucket = f.type === 'image' ? 'images' : 'videos'
+  const { data } = supabase.storage.from(bucket).getPublicUrl(f.filename)
+  return data.publicUrl
+}
 
   const dropZone = (type, ref) => ({
     onDragOver: e => { e.preventDefault(); setDragOver(type) },
